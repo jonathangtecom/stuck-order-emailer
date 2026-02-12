@@ -122,6 +122,35 @@ class TestEmailValidationComprehensive:
             result = _is_valid_email(email)
             assert isinstance(result, bool), f"Email validation should return bool for {email}"
 
+    def test_email_validation_edge_cases_fixed(self):
+        """Test email validation catches malformed addresses (fixed bugs)"""
+        # Valid emails should pass
+        assert _is_valid_email('user@domain.com') == True
+        assert _is_valid_email('user.name@domain.co.uk') == True
+        assert _is_valid_email('user+tag@domain.com') == True
+        assert _is_valid_email('a@b.co') == True
+
+        # Invalid: double @ symbols
+        assert _is_valid_email('user@@domain.com') == False
+
+        # Invalid: dot before @
+        assert _is_valid_email('user@.com') == False
+
+        # Invalid: multiple consecutive dots in domain
+        assert _is_valid_email('user@domain..com') == False
+
+        # Invalid: trailing dot in domain
+        assert _is_valid_email('user@domain.com.') == False
+
+        # Invalid: trailing hyphen in domain
+        assert _is_valid_email('user@domain-.com') == False
+
+        # Invalid: no TLD
+        assert _is_valid_email('user@domain') == False
+
+        # Invalid: single-char TLD
+        assert _is_valid_email('user@domain.c') == False
+
 
 # =============================================================================
 # CATEGORY 2: DAYS THRESHOLD VALIDATION

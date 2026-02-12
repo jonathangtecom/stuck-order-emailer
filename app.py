@@ -728,9 +728,9 @@ def _extract_store_form(form):
 
 def _is_valid_email(email):
     """
-    Validate email address format.
+    Validate email address format per RFC 5321.
 
-    RFC 5321 requirements:
+    Requirements:
     - Max length: 254 characters
     - Format: local-part@domain
     - Local part: alphanumeric, dots, hyphens, underscores, plus signs
@@ -739,22 +739,41 @@ def _is_valid_email(email):
     if not email or len(email) > 254:
         return False
 
-    # More robust email regex:
-    # - Local part must start with alphanumeric
-    # - Can contain dots, hyphens, underscores, plus signs
-    # - Domain must have proper structure with TLD
-    # - Domain TLD must be at least 2 chars
-    # - Allows single-char domain labels (e.g., a@b.com)
-    pattern = r'^[a-zA-Z0-9][a-zA-Z0-9._%+-]*@[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$'
-
-    if not re.match(pattern, email):
+    # Split at @ exactly once
+    if email.count('@') != 1:
         return False
 
-    # Additional validation: no consecutive dots, no dot at start/end of local part
-    local, _, domain = email.rpartition('@')
+    local, domain = email.split('@')
+
+    # Validate local part
+    if not local or len(local) > 64:  # RFC 5321 limit
+        return False
     if '..' in local or local.startswith('.') or local.endswith('.'):
         return False
+    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9._%+-]*$', local):
+        return False
+
+    # Validate domain
+    if not domain or len(domain) > 253:  # RFC 1035 limit
+        return False
     if '..' in domain or domain.startswith('.') or domain.startswith('-'):
+        return False
+    if domain.endswith('.') or domain.endswith('-'):
+        return False
+    if '.' not in domain:
+        return False
+
+    # Validate domain labels
+    labels = domain.split('.')
+    for label in labels:
+        if not label or len(label) > 63:  # RFC 1035 limit
+            return False
+        if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$', label):
+            return False
+
+    # TLD must be 2+ chars, alphabetic
+    tld = labels[-1]
+    if len(tld) < 2 or not tld.isalpha():
         return False
 
     return True

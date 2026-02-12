@@ -307,7 +307,7 @@ def _load_template(template_filename):
     path = os.path.join(TEMPLATES_PATH, template_filename)
     real_path = os.path.realpath(path)
     real_templates = os.path.realpath(TEMPLATES_PATH)
-    if not real_path.startswith(real_templates):
+    if not real_path.startswith(real_templates + os.sep):
         logger.error("Template path traversal attempt: %s", template_filename)
         return None
     try:
