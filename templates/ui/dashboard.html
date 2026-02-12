@@ -1,0 +1,135 @@
+{% extends "ui/layout.html" %}
+
+{% block title %}Dashboard — Stuck Order Emailer{% endblock %}
+
+{% block content %}
+<h2>Dashboard</h2>
+
+<div class="stats-grid">
+  <div class="stat-card">
+    <p class="stat-value">{{ total_stores }}</p>
+    <p class="stat-label">Total Stores</p>
+  </div>
+  <div class="stat-card">
+    <p class="stat-value">{{ enabled_stores }}</p>
+    <p class="stat-label">Enabled Stores</p>
+  </div>
+  <div class="stat-card">
+    <p class="stat-value">{{ stats.today_count }}</p>
+    <p class="stat-label">Emails Today</p>
+  </div>
+  <div class="stat-card">
+    <p class="stat-value">{{ stats.week_count }}</p>
+    <p class="stat-label">Emails This Week</p>
+  </div>
+  <div class="stat-card">
+    <p class="stat-value">{{ stats.total_count }}</p>
+    <p class="stat-label">Emails Total</p>
+  </div>
+</div>
+
+<div style="display: flex; gap: 0.75rem; margin-bottom: 1.5rem;">
+  <button id="btn-dry-run" class="secondary outline" onclick="runProcess(true)">Dry Run</button>
+  <button id="btn-run" onclick="runProcess(false)">Run Now (Send Emails)</button>
+</div>
+
+<div id="run-results" style="display: none;">
+  <h3 id="run-results-title"></h3>
+  <pre id="run-results-body" style="max-height: 400px; overflow: auto; padding: 1rem; background: var(--pico-code-background-color); border-radius: 0.25rem; white-space: pre-wrap;"></pre>
+</div>
+
+<h3>Stores</h3>
+{% if stores %}
+<table class="compact" role="grid">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>From Email</th>
+      <th>Template</th>
+      <th>Threshold</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for store in stores %}
+    <tr>
+      <td>
+        <span class="status-dot {{ 'enabled' if store.enabled else 'disabled' }}"></span>
+        <a href="/stores/{{ store.id }}/edit">{{ store.name }}</a>
+      </td>
+      <td>{{ store.from_email }}</td>
+      <td>{{ store.email_template }}</td>
+      <td>{{ store.days_threshold }} days</td>
+      <td>{{ 'Enabled' if store.enabled else 'Disabled' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No stores configured yet. <a href="/stores/new">Add your first store</a>.</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function runProcess(dryRun) {
+  const btn = dryRun ? document.getElementById('btn-dry-run') : document.getElementById('btn-run');
+  const origText = btn.textContent;
+
+  if (!dryRun && !confirm('This will send real emails to customers. Continue?')) return;
+
+  btn.disabled = true;
+  btn.setAttribute('aria-busy', 'true');
+  btn.textContent = dryRun ? 'Running dry run...' : 'Sending emails...';
+
+  try {
+    const url = dryRun ? '/api/run?dry_run=1' : '/api/run';
+    const resp = await fetch(url, {method: 'POST'});
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      alert('Error: ' + (data.error || 'Unknown error'));
+      return;
+    }
+
+    const resultsDiv = document.getElementById('run-results');
+    const title = document.getElementById('run-results-title');
+    const body = document.getElementById('run-results-body');
+
+    title.textContent = dryRun ? 'Dry Run Results (no emails sent)' : 'Run Results';
+    body.textContent = formatResults(data);
+    resultsDiv.style.display = 'block';
+  } catch (e) {
+    alert('Request failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.removeAttribute('aria-busy');
+    btn.textContent = origText;
+  }
+}
+
+function formatResults(data) {
+  let lines = [];
+  lines.push(`Stores processed: ${data.processed}`);
+  lines.push(`Emails ${data.dry_run ? 'would send' : 'sent'}: ${data.emails_sent}`);
+  lines.push(`Skipped (already sent): ${data.skipped}`);
+  lines.push(`Errors: ${data.errors}`);
+  lines.push('');
+
+  for (const detail of (data.details || [])) {
+    lines.push(`--- ${detail.store} ---`);
+    if (detail.error) {
+      lines.push(`  ERROR: ${detail.error}`);
+    } else {
+      lines.push(`  ${data.dry_run ? 'Would send' : 'Sent'}: ${detail.sent}, Skipped: ${detail.skipped}`);
+      if (detail.would_send) {
+        for (const email of detail.would_send) {
+          lines.push(`  -> ${email.order_number} | ${email.customer_email} | ${email.tracking_number} | ${email.tracking_status} | ${email.days_waiting} days | Subject: ${email.subject}`);
+        }
+      }
+    }
+  }
+  return lines.join('\n');
+}
+</script>
+{% endblock %}

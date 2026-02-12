@@ -1,0 +1,107 @@
+{% extends "ui/layout.html" %}
+
+{% block title %}{{ 'Edit' if store else 'Add' }} Store — Stuck Order Emailer{% endblock %}
+
+{% block content %}
+<h2>{{ 'Edit' if store else 'Add New' }} Store</h2>
+
+<form method="post" action="{{ '/stores/' + store.id if store else '/stores' }}">
+  <div class="grid">
+    <label>
+      Store Name *
+      <input type="text" name="name" value="{{ store.name if store else '' }}" required
+             {% if not store %}oninput="generateSlug(this.value)"{% endif %}>
+    </label>
+    <label>
+      Store ID
+      <input type="text" name="id" id="store-id" value="{{ store.id if store else '' }}"
+             {% if store %}readonly{% endif %}
+             placeholder="auto-generated from name">
+    </label>
+  </div>
+
+  <fieldset>
+    <legend>Shopify Configuration</legend>
+    <label>
+      Shopify Store URL *
+      <input type="text" name="shopify_store_url"
+             value="{{ store.shopify_store_url if store else '' }}"
+             placeholder="your-store.myshopify.com" required>
+    </label>
+    <label>
+      Shopify Admin API Token *
+      <input type="password" name="shopify_admin_api_token"
+             placeholder="{{ '••••••••' if store else '' }}"
+             {{ '' if store else 'required' }}>
+      {% if store %}<small>Leave blank to keep existing token.</small>{% endif %}
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Parcel Panel Configuration</legend>
+    <label>
+      Parcel Panel API Key *
+      <input type="password" name="parcel_panel_api_key"
+             placeholder="{{ '••••••••' if store else '' }}"
+             {{ '' if store else 'required' }}>
+      {% if store %}<small>Leave blank to keep existing key.</small>{% endif %}
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Email Configuration</legend>
+    <div class="grid">
+      <label>
+        From Email *
+        <input type="email" name="from_email"
+               value="{{ store.from_email if store else '' }}" required>
+      </label>
+      <label>
+        From Name *
+        <input type="text" name="from_name"
+               value="{{ store.from_name if store else '' }}" required>
+      </label>
+    </div>
+    <label>
+      Email Subject *
+      <input type="text" name="email_subject"
+             value="{{ store.email_subject if store else 'Update on your order {{ order_number }}' }}"
+             required>
+      <small>Supports Jinja2 variables: {{ '{{' }} first_name {{ '}}' }}, {{ '{{' }} customer_name {{ '}}' }}, {{ '{{' }} order_number {{ '}}' }}, {{ '{{' }} tracking_number {{ '}}' }}, {{ '{{' }} store_name {{ '}}' }}, {{ '{{' }} days_waiting {{ '}}' }}</small>
+    </label>
+    <label>
+      Email Template *
+      <select name="email_template" required>
+        {% for t in templates %}
+        <option value="{{ t }}" {{ 'selected' if store and store.email_template == t else '' }}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </fieldset>
+
+  <label>
+    Days Threshold
+    <input type="number" name="days_threshold" min="1" max="60"
+           value="{{ store.days_threshold if store else 8 }}">
+    <small>Send email if tracking is stuck for this many days.</small>
+  </label>
+
+  <div style="display: flex; gap: 1rem;">
+    <button type="submit">{{ 'Save Changes' if store else 'Create Store' }}</button>
+    <a href="/stores" role="button" class="secondary">Cancel</a>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function generateSlug(name) {
+  const slug = name.toLowerCase().trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  document.getElementById('store-id').value = slug;
+}
+</script>
+{% endblock %}

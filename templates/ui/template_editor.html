@@ -1,0 +1,225 @@
+{% extends "ui/layout.html" %}
+
+{% block title %}Template Editor — Stuck Order Emailer{% endblock %}
+
+{% block content %}
+<h2>Email Template Editor</h2>
+
+<div class="editor-layout">
+  <!-- Sidebar: file list -->
+  <div class="editor-sidebar">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+      <strong>Templates</strong>
+      <button class="outline" style="padding: 0.25rem 0.5rem; font-size: 0.8rem;" onclick="newTemplate()">+ New</button>
+    </div>
+    <ul class="file-list" id="file-list"></ul>
+  </div>
+
+  <!-- Main: editor + preview -->
+  <div class="editor-main">
+    <div id="editor-filename" style="margin-bottom: 0.5rem; font-weight: 600; color: var(--pico-muted-color);">
+      No file selected
+    </div>
+    <div id="editor-container"></div>
+    <div class="editor-actions">
+      <button id="btn-save" onclick="saveFile()" disabled>Save</button>
+      <button id="btn-preview" class="secondary" onclick="previewFile()" disabled>Preview</button>
+      <button id="btn-duplicate" class="secondary outline" onclick="duplicateFile()" disabled>Duplicate</button>
+      <button id="btn-delete" class="secondary outline" onclick="deleteFile()" disabled style="color: var(--pico-del-color, #c62828);">Delete</button>
+    </div>
+    <iframe id="preview-frame" class="preview-frame" sandbox="allow-same-origin" title="Email template preview" style="display: none;"></iframe>
+  </div>
+</div>
+
+<!-- Toast notification -->
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module">
+  import { EditorView, basicSetup } from 'https://esm.sh/@codemirror/basic-setup@0.20.0';
+  import { html } from 'https://esm.sh/@codemirror/lang-html@6.4.9';
+
+  let editor = null;
+  let currentFile = null;
+
+  function initEditor(content) {
+    const container = document.getElementById('editor-container');
+    if (editor) editor.destroy();
+
+    editor = new EditorView({
+      doc: content || '',
+      extensions: [
+        basicSetup,
+        html(),
+        EditorView.theme({
+          '&': { height: '450px' },
+          '.cm-scroller': { overflow: 'auto' },
+        }),
+      ],
+      parent: container,
+    });
+  }
+
+  function getEditorContent() {
+    return editor ? editor.state.doc.toString() : '';
+  }
+
+  function showToast(message, type) {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.className = `toast show ${type}`;
+    setTimeout(() => { toast.className = 'toast'; }, 3000);
+  }
+
+  function setButtonsEnabled(enabled) {
+    document.getElementById('btn-save').disabled = !enabled;
+    document.getElementById('btn-preview').disabled = !enabled;
+    document.getElementById('btn-duplicate').disabled = !enabled;
+    document.getElementById('btn-delete').disabled = !enabled;
+  }
+
+  async function loadFileList() {
+    try {
+      const resp = await fetch('/api/templates');
+      const data = await resp.json();
+      const list = document.getElementById('file-list');
+      list.innerHTML = '';
+
+      for (const filename of data.templates) {
+        const li = document.createElement('li');
+        li.textContent = filename;
+        li.onclick = () => loadFile(filename);
+        if (filename === currentFile) li.classList.add('active');
+        list.appendChild(li);
+      }
+    } catch (e) {
+      console.error('Failed to load file list:', e);
+    }
+  }
+
+  async function loadFile(filename) {
+    try {
+      const resp = await fetch(`/api/templates/${encodeURIComponent(filename)}`);
+      if (!resp.ok) throw new Error('Failed to load file');
+      const data = await resp.json();
+
+      currentFile = filename;
+      document.getElementById('editor-filename').textContent = filename;
+      initEditor(data.content);
+      setButtonsEnabled(true);
+      document.getElementById('preview-frame').style.display = 'none';
+      loadFileList();
+    } catch (e) {
+      showToast('Failed to load file: ' + e.message, 'error');
+    }
+  }
+
+  window.saveFile = async function() {
+    if (!currentFile) return;
+    try {
+      const resp = await fetch(`/api/templates/${encodeURIComponent(currentFile)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: getEditorContent() }),
+      });
+      if (!resp.ok) throw new Error('Save failed');
+      showToast('Saved successfully', 'success');
+    } catch (e) {
+      showToast('Failed to save: ' + e.message, 'error');
+    }
+  };
+
+  window.previewFile = async function() {
+    try {
+      const resp = await fetch('/api/templates/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: getEditorContent() }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.error || 'Preview failed');
+      }
+      const html = await resp.text();
+      const iframe = document.getElementById('preview-frame');
+      iframe.srcdoc = html;
+      iframe.style.display = 'block';
+    } catch (e) {
+      showToast('Preview error: ' + e.message, 'error');
+    }
+  };
+
+  window.newTemplate = async function() {
+    const filename = prompt('Template filename (e.g. my-template.html):');
+    if (!filename) return;
+
+    const safeName = filename.endsWith('.html') ? filename : filename + '.html';
+    try {
+      const resp = await fetch(`/api/templates/${encodeURIComponent(safeName)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: '' }),
+      });
+      if (!resp.ok) throw new Error('Create failed');
+      await loadFileList();
+      await loadFile(safeName);
+      showToast('Template created', 'success');
+    } catch (e) {
+      showToast('Failed to create template: ' + e.message, 'error');
+    }
+  };
+
+  window.duplicateFile = async function() {
+    if (!currentFile) return;
+    const newName = prompt('New filename:', currentFile.replace('.html', '-copy.html'));
+    if (!newName) return;
+
+    const safeName = newName.endsWith('.html') ? newName : newName + '.html';
+    try {
+      const resp = await fetch(`/api/templates/${encodeURIComponent(safeName)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: getEditorContent() }),
+      });
+      if (!resp.ok) throw new Error('Duplicate failed');
+      await loadFileList();
+      await loadFile(safeName);
+      showToast('Template duplicated', 'success');
+    } catch (e) {
+      showToast('Failed to duplicate: ' + e.message, 'error');
+    }
+  };
+
+  window.deleteFile = async function() {
+    if (!currentFile) return;
+    if (!confirm(`Delete template "${currentFile}"?`)) return;
+
+    try {
+      const resp = await fetch(`/api/templates/${encodeURIComponent(currentFile)}`, {
+        method: 'DELETE',
+      });
+      if (!resp.ok) throw new Error('Delete failed');
+
+      currentFile = null;
+      document.getElementById('editor-filename').textContent = 'No file selected';
+      if (editor) editor.destroy();
+      editor = null;
+      setButtonsEnabled(false);
+      document.getElementById('preview-frame').style.display = 'none';
+      await loadFileList();
+      showToast('Template deleted', 'success');
+    } catch (e) {
+      showToast('Failed to delete: ' + e.message, 'error');
+    }
+  };
+
+  // Initialize
+  initEditor('');
+  loadFileList().then(() => {
+    // Auto-load first file if available
+    const firstItem = document.querySelector('#file-list li');
+    if (firstItem) firstItem.click();
+  });
+</script>
+{% endblock %}

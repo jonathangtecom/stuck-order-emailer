@@ -1,0 +1,78 @@
+{% extends "ui/layout.html" %}
+
+{% block title %}Stores — Stuck Order Emailer{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+  <h2 style="margin-bottom: 0;">Stores</h2>
+  <a href="/stores/new" role="button">Add Store</a>
+</div>
+
+{% if stores %}
+<table class="compact" role="grid">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>From Email</th>
+      <th>Template</th>
+      <th>Enabled</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for store in stores %}
+    <tr>
+      <td>{{ store.name }}</td>
+      <td>{{ store.from_email }}</td>
+      <td>{{ store.email_template }}</td>
+      <td>
+        <label class="toggle-switch">
+          <input type="checkbox"
+                 {{ 'checked' if store.enabled else '' }}
+                 data-store-id="{{ store.id }}"
+                 aria-label="Toggle {{ store.name }}"
+                 onchange="toggleStore(this)">
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
+      <td>
+        <a href="/stores/{{ store.id }}/edit">Edit</a>
+        &nbsp;
+        <a href="#" data-store-id="{{ store.id }}" data-store-name="{{ store.name }}" onclick="deleteStore(this); return false;" style="color: var(--pico-del-color, #c62828);">Delete</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No stores configured yet. Click "Add Store" to get started.</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function toggleStore(checkbox) {
+  const storeId = checkbox.dataset.storeId;
+  try {
+    const resp = await fetch(`/stores/${encodeURIComponent(storeId)}/toggle`, {method: 'POST'});
+    const data = await resp.json();
+    checkbox.checked = data.enabled;
+  } catch (e) {
+    console.error('Toggle failed:', e);
+    checkbox.checked = !checkbox.checked;
+  }
+}
+
+function deleteStore(el) {
+  const storeId = el.dataset.storeId;
+  const storeName = el.dataset.storeName;
+  if (!confirm(`Delete store "${storeName}"? This cannot be undone.`)) return;
+
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = `/stores/${encodeURIComponent(storeId)}/delete`;
+  document.body.appendChild(form);
+  form.submit();
+}
+</script>
+{% endblock %}

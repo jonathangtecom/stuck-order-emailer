@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login — Stuck Order Emailer</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="container" style="max-width: 400px; margin-top: 10vh;">
+    <article>
+      <header>
+        <h2 style="margin-bottom: 0;">Stuck Order Emailer</h2>
+      </header>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="flash-{{ category }}" role="alert">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      <form method="post" action="/login">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" placeholder="Enter admin password" required autofocus>
+        <button type="submit">Log In</button>
+      </form>
+    </article>
+  </main>
+</body>
+</html>

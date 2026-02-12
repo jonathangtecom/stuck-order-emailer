@@ -1,0 +1,80 @@
+{% extends "ui/layout.html" %}
+
+{% block title %}Email Logs — Stuck Order Emailer{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+  <h2 style="margin-bottom: 0;">Sent Email Logs</h2>
+  <a href="/logs/export?store={{ filter_store or '' }}&date_from={{ filter_date_from or '' }}&date_to={{ filter_date_to or '' }}"
+     role="button" class="secondary outline" style="font-size: 0.9rem;">Export CSV</a>
+</div>
+
+<form method="get" action="/logs" class="filter-bar">
+  <label>
+    Store
+    <select name="store">
+      <option value="">All Stores</option>
+      {% for store in stores %}
+      <option value="{{ store.id }}" {{ 'selected' if filter_store == store.id else '' }}>{{ store.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    From
+    <input type="date" name="date_from" value="{{ filter_date_from or '' }}">
+  </label>
+  <label>
+    To
+    <input type="date" name="date_to" value="{{ filter_date_to or '' }}">
+  </label>
+  <button type="submit" style="margin-top: auto;">Filter</button>
+</form>
+
+{% if emails %}
+<table class="compact" role="grid">
+  <thead>
+    <tr>
+      <th>Store</th>
+      <th>Order #</th>
+      <th>Customer Email</th>
+      <th>Tracking #</th>
+      <th>Status</th>
+      <th>Days Waiting</th>
+      <th>Sent At</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for email in emails %}
+    <tr>
+      <td>{{ email.store_name }}</td>
+      <td>{{ email.order_number }}</td>
+      <td>{{ email.customer_email }}</td>
+      <td>{{ email.tracking_number or '—' }}</td>
+      <td>{{ email.tracking_status or '—' }}</td>
+      <td>{{ email.days_waiting or '—' }}</td>
+      <td>{{ email.sent_at }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if total_pages > 1 %}
+<nav class="pagination" aria-label="Log pagination">
+  {% if page > 1 %}
+  <a href="/logs?page={{ page - 1 }}&store={{ filter_store or '' }}&date_from={{ filter_date_from or '' }}&date_to={{ filter_date_to or '' }}" aria-label="Previous page">
+    &larr; Previous
+  </a>
+  {% endif %}
+  <span>Page {{ page }} of {{ total_pages }}</span>
+  {% if page < total_pages %}
+  <a href="/logs?page={{ page + 1 }}&store={{ filter_store or '' }}&date_from={{ filter_date_from or '' }}&date_to={{ filter_date_to or '' }}" aria-label="Next page">
+    Next &rarr;
+  </a>
+  {% endif %}
+</nav>
+{% endif %}
+
+{% else %}
+<p>No emails sent yet.</p>
+{% endif %}
+{% endblock %}

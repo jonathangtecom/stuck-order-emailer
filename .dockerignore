@@ -1,0 +1,9 @@
+.env
+.env.*
+.git
+.gitignore
+tests/
+data/app.db*
+__pycache__/
+*.pyc
+Caddyfile

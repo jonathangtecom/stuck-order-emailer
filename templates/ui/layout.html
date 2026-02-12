@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Stuck Order Emailer{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="/static/style.css">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <nav class="container-fluid" aria-label="Main navigation">
+    <ul>
+      <li><strong>Stuck Order Emailer</strong></li>
+    </ul>
+    <ul>
+      <li><a href="/" {% if active_page == 'dashboard' %}aria-current="page"{% endif %}>Dashboard</a></li>
+      <li><a href="/stores" {% if active_page == 'stores' %}aria-current="page"{% endif %}>Stores</a></li>
+      <li><a href="/templates" {% if active_page == 'templates' %}aria-current="page"{% endif %}>Templates</a></li>
+      <li><a href="/logs" {% if active_page == 'logs' %}aria-current="page"{% endif %}>Logs</a></li>
+      <li><a href="/logout">Logout</a></li>
+    </ul>
+  </nav>
+
+  <main class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash-{{ category }}" role="alert">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

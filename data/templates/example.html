@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f4f4; font-family: Arial, Helvetica, sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f4f4f4;">
+    <tr>
+      <td align="center" style="padding: 40px 20px;">
+        <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden;">
+          <!-- Header -->
+          <tr>
+            <td style="background-color: #2d3748; padding: 30px; text-align: center;">
+              <h1 style="color: #ffffff; margin: 0; font-size: 24px;">{{ store_name }}</h1>
+            </td>
+          </tr>
+          <!-- Body -->
+          <tr>
+            <td style="padding: 40px 30px;">
+              <h2 style="color: #2d3748; margin-top: 0;">Update on your order {{ order_number }}</h2>
+              <p style="color: #4a5568; font-size: 16px; line-height: 1.6;">
+                Hi {{ customer_name }},
+              </p>
+              <p style="color: #4a5568; font-size: 16px; line-height: 1.6;">
+                We noticed your order from {{ order_date }} hasn't shipped yet.
+                We're looking into this and will make sure it gets to you as soon as possible.
+              </p>
+              <p style="color: #4a5568; font-size: 16px; line-height: 1.6;">
+                Your tracking number: <strong>{{ tracking_number }}</strong>
+              </p>
+              <table role="presentation" cellspacing="0" cellpadding="0" style="margin: 30px 0;">
+                <tr>
+                  <td style="background-color: #4299e1; border-radius: 6px;">
+                    <a href="{{ tracking_url }}" style="display: inline-block; padding: 14px 30px; color: #ffffff; text-decoration: none; font-size: 16px; font-weight: bold;">
+                      Track Your Order
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="color: #4a5568; font-size: 16px; line-height: 1.6;">
+                If you have any questions, simply reply to this email.
+              </p>
+              <p style="color: #4a5568; font-size: 16px; line-height: 1.6;">
+                Best regards,<br>
+                The {{ store_name }} Team
+              </p>
+            </td>
+          </tr>
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f7fafc; padding: 20px 30px; text-align: center;">
+              <p style="color: #a0aec0; font-size: 12px; margin: 0;">
+                This is an automated message regarding your order {{ order_number }}.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
