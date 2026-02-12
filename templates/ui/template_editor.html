@@ -24,12 +24,47 @@
     <div class="editor-actions">
       <button id="btn-save" onclick="saveFile()" disabled>Save</button>
       <button id="btn-preview" class="secondary" onclick="previewFile()" disabled>Preview</button>
+      <button id="btn-test-email" class="secondary" onclick="openTestEmailModal()" disabled>Send Test Email</button>
       <button id="btn-duplicate" class="secondary outline" onclick="duplicateFile()" disabled>Duplicate</button>
       <button id="btn-delete" class="secondary outline" onclick="deleteFile()" disabled style="color: var(--pico-del-color, #c62828);">Delete</button>
     </div>
     <iframe id="preview-frame" class="preview-frame" sandbox="allow-same-origin" title="Email template preview" style="display: none;"></iframe>
   </div>
 </div>
+
+<!-- Test Email Modal -->
+<dialog id="test-email-modal">
+  <article>
+    <header>
+      <button aria-label="Close" rel="prev" onclick="closeTestEmailModal()"></button>
+      <h3>Send Test Email</h3>
+    </header>
+    <form id="test-email-form" onsubmit="sendTestEmail(event)">
+      <label>
+        Recipient Email (your email)
+        <input type="email" name="to_email" required placeholder="your@email.com">
+      </label>
+      <label>
+        From Email
+        <input type="email" name="from_email" required placeholder="support@yourstore.com">
+        <small>Must be verified in SendGrid</small>
+      </label>
+      <label>
+        From Name
+        <input type="text" name="from_name" required placeholder="Your Store">
+      </label>
+      <label>
+        Subject Line
+        <input type="text" name="subject" required placeholder="Update on your order {{ order_number }}">
+        <small>Supports Jinja2 variables</small>
+      </label>
+      <footer>
+        <button type="button" class="secondary" onclick="closeTestEmailModal()">Cancel</button>
+        <button type="submit">Send Test</button>
+      </footer>
+    </form>
+  </article>
+</dialog>
 
 <!-- Toast notification -->
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -75,6 +110,7 @@
   function setButtonsEnabled(enabled) {
     document.getElementById('btn-save').disabled = !enabled;
     document.getElementById('btn-preview').disabled = !enabled;
+    document.getElementById('btn-test-email').disabled = !enabled;
     document.getElementById('btn-duplicate').disabled = !enabled;
     document.getElementById('btn-delete').disabled = !enabled;
   }
@@ -211,6 +247,48 @@
       showToast('Template deleted', 'success');
     } catch (e) {
       showToast('Failed to delete: ' + e.message, 'error');
+    }
+  };
+
+  window.openTestEmailModal = function() {
+    document.getElementById('test-email-modal').showModal();
+  };
+
+  window.closeTestEmailModal = function() {
+    document.getElementById('test-email-modal').close();
+  };
+
+  window.sendTestEmail = async function(event) {
+    event.preventDefault();
+    const form = event.target;
+    const formData = new FormData(form);
+
+    const payload = {
+      content: getEditorContent(),
+      to_email: formData.get('to_email'),
+      from_email: formData.get('from_email'),
+      from_name: formData.get('from_name'),
+      subject: formData.get('subject'),
+    };
+
+    try {
+      const resp = await fetch('/api/templates/send-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await resp.json();
+
+      if (!resp.ok) {
+        throw new Error(result.error || 'Send failed');
+      }
+
+      closeTestEmailModal();
+      form.reset();
+      showToast(result.message || 'Test email sent successfully!', 'success');
+    } catch (e) {
+      showToast('Failed to send test email: ' + e.message, 'error');
     }
   };
 

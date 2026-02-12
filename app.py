@@ -498,6 +498,74 @@ def api_template_preview():
         return jsonify({'error': f'Template error: {e}'}), 400
 
 
+@app.route('/api/templates/send-test', methods=['POST'])
+@login_required
+def api_template_send_test():
+    """Send a test email with the template using sample data."""
+    from src.email_sender import send_email
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    # Validate required fields
+    required_fields = ['content', 'to_email', 'from_email', 'from_name', 'subject']
+    for field in required_fields:
+        if not data.get(field):
+            return jsonify({'error': f'{field} is required'}), 400
+
+    # Validate email format
+    if not _is_valid_email(data['to_email']) or not _is_valid_email(data['from_email']):
+        return jsonify({'error': 'Invalid email format'}), 400
+
+    # Get SendGrid API key from environment
+    sendgrid_api_key = os.environ.get('SENDGRID_API_KEY', '')
+    if not sendgrid_api_key or sendgrid_api_key == 'SG.your-key-here':
+        return jsonify({'error': 'SENDGRID_API_KEY not configured in environment variables'}), 400
+
+    # Sample data for template rendering
+    sample_data = {
+        'customer_name': 'John Doe',
+        'first_name': 'John',
+        'order_number': '#1042',
+        'tracking_number': 'YT2312345678',
+        'tracking_url': 'https://parcelpanel.com/track/YT2312345678',
+        'store_name': 'Example Store',
+        'order_date': 'January 28, 2026',
+        'days_waiting': '10',
+    }
+
+    try:
+        # Render template
+        env = SandboxedEnvironment()
+        template = env.from_string(data['content'])
+        html_content = template.render(**sample_data)
+
+        # Render subject line (also supports Jinja2 variables)
+        subject_template = env.from_string(data['subject'])
+        subject = subject_template.render(**sample_data)
+
+        # Send email
+        success = send_email(
+            to_email=data['to_email'],
+            from_email=data['from_email'],
+            from_name=data['from_name'],
+            subject=subject,
+            html_content=html_content,
+            sendgrid_api_key=sendgrid_api_key,
+        )
+
+        if success:
+            logger.info("Test email sent to %s", data['to_email'])
+            return jsonify({'ok': True, 'message': f'Test email sent to {data["to_email"]}'})
+        else:
+            return jsonify({'error': 'Failed to send email. Check server logs for details.'}), 500
+
+    except Exception as e:
+        logger.error("Test email failed: %s", e)
+        return jsonify({'error': f'Error: {str(e)}'}), 500
+
+
 # ── Logs ─────────────────────────────────────────────────────
 
 @app.route('/logs')
