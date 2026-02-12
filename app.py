@@ -409,6 +409,7 @@ def template_editor():
 @login_required
 def api_template_list():
     templates = _list_template_files()
+    logger.info("Template list requested: found %d files: %s", len(templates), templates)
     return jsonify({'templates': templates})
 
 
@@ -425,8 +426,11 @@ def api_template_get(filename):
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             content = f.read()
+        logger.info("Loaded template %s: %d bytes, first 100 chars: %s",
+                   filename, len(content), content[:100] if content else '(empty)')
         return jsonify({'filename': filename, 'content': content})
     except FileNotFoundError:
+        logger.error("Template not found: %s (resolved path: %s)", filename, filepath)
         return jsonify({'error': 'File not found'}), 404
 
 
