@@ -5,7 +5,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-RUN mkdir -p /app/data/templates
 
 # Git commit for Sentry release tracking (build with --build-arg GIT_COMMIT=$(git rev-parse --short HEAD))
 ARG GIT_COMMIT=unknown
