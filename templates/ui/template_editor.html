@@ -73,13 +73,11 @@
 {% block scripts %}
 <script type="module">
   // Import all packages from modern CodeMirror 6 (version 6.x)
-  import { EditorView, keymap } from 'https://esm.sh/@codemirror/view@6';
+  import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightActiveLine } from 'https://esm.sh/@codemirror/view@6';
   import { EditorState } from 'https://esm.sh/@codemirror/state@6';
   import { html } from 'https://esm.sh/@codemirror/lang-html@6';
-  import { defaultKeymap } from 'https://esm.sh/@codemirror/commands@6';
-  import { history, historyKeymap } from 'https://esm.sh/@codemirror/history@6';
-  import { lineNumbers, highlightActiveLineGutter } from 'https://esm.sh/@codemirror/view@6';
-  import { highlightActiveLine } from 'https://esm.sh/@codemirror/view@6';
+  // CRITICAL: history and historyKeymap come from commands, NOT a separate package
+  import { defaultKeymap, history, historyKeymap } from 'https://esm.sh/@codemirror/commands@6';
   import { syntaxHighlighting, defaultHighlightStyle } from 'https://esm.sh/@codemirror/language@6';
 
   // Build basicSetup manually with modern packages
