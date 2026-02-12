@@ -200,6 +200,7 @@ def set_security_headers(response):
         "script-src 'self' https://esm.sh 'unsafe-inline'; "
         "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
         "connect-src 'self' https://esm.sh; "
+        "img-src 'self' data: https:; "
         "frame-src 'self'"
     )
     return response
