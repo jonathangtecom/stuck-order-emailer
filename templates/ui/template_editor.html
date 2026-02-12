@@ -75,8 +75,23 @@
 
 {% block scripts %}
 <script type="module">
-  import { EditorView, basicSetup } from 'https://esm.sh/@codemirror/basic-setup@0.20.0';
-  import { html } from 'https://esm.sh/@codemirror/lang-html@6.4.9';
+  import { EditorView, keymap } from 'https://esm.sh/@codemirror/view@6';
+  import { EditorState } from 'https://esm.sh/@codemirror/state@6';
+  import { html } from 'https://esm.sh/@codemirror/lang-html@6';
+  import { defaultKeymap } from 'https://esm.sh/@codemirror/commands@6';
+  import { history, historyKeymap } from 'https://esm.sh/@codemirror/history@6';
+  import { lineNumbers, highlightActiveLineGutter } from 'https://esm.sh/@codemirror/gutter@6';
+  import { highlightActiveLine } from 'https://esm.sh/@codemirror/view@6';
+  import { syntaxHighlighting, defaultHighlightStyle } from 'https://esm.sh/@codemirror/language@6';
+
+  const basicSetup = [
+    lineNumbers(),
+    highlightActiveLineGutter(),
+    highlightActiveLine(),
+    history(),
+    syntaxHighlighting(defaultHighlightStyle),
+    keymap.of([...defaultKeymap, ...historyKeymap])
+  ];
 
   let editor = null;
   let currentFile = null;
