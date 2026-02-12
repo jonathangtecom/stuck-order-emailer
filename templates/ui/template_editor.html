@@ -146,7 +146,8 @@
     }
     isDirty = true;
     updateSaveStatus('unsaved');
-    scheduleAutosave();
+    // DISABLED: Autosave disabled until debugging is complete
+    // scheduleAutosave();
   }
 
   function scheduleAutosave() {
