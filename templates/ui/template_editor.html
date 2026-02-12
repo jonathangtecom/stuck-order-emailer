@@ -160,6 +160,22 @@
 
   async function performAutosave() {
     if (!currentFile || !isDirty || isSaving) return;
+
+    const content = getEditorContent();
+
+    // SAFETY: Never autosave if content is empty or too short (likely a bug)
+    if (!content || content.trim().length < 10) {
+      console.warn('Autosave blocked: content too short or empty:', content.length);
+      return;
+    }
+
+    // SAFETY: Never autosave if content is different from what we loaded
+    // (unless user actually typed something)
+    if (content === '') {
+      console.error('Autosave blocked: refusing to save empty content');
+      return;
+    }
+
     isSaving = true;
     updateSaveStatus('saving');
 
@@ -167,12 +183,12 @@
       const resp = await fetch(`/api/templates/${encodeURIComponent(currentFile)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: getEditorContent() }),
+        body: JSON.stringify({ content }),
       });
 
       if (!resp.ok) throw new Error('Autosave failed');
 
-      lastSavedContent = getEditorContent();
+      lastSavedContent = content;
       isDirty = false;
       updateSaveStatus('saved');
     } catch (e) {
