@@ -90,6 +90,10 @@
     const container = document.getElementById('editor-container');
     if (editor) editor.destroy();
 
+    // Set lastSavedContent BEFORE creating editor to prevent race condition
+    lastSavedContent = content || '';
+    isDirty = false;
+
     editor = new EditorView({
       doc: content || '',
       extensions: [
@@ -108,8 +112,6 @@
       parent: container,
     });
 
-    lastSavedContent = content || '';
-    isDirty = false;
     updateSaveStatus('saved');
   }
 
