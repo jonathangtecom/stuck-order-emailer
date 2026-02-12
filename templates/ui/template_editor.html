@@ -17,8 +17,11 @@
 
   <!-- Main: editor + preview -->
   <div class="editor-main">
-    <div id="editor-filename" style="margin-bottom: 0.5rem; font-weight: 600; color: var(--pico-muted-color);">
-      No file selected
+    <div style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.75rem;">
+      <div id="editor-filename" style="font-weight: 600; color: var(--pico-muted-color);">
+        No file selected
+      </div>
+      <span id="save-status" class="save-status" style="display: none; font-size: 0.85rem;"></span>
     </div>
     <div id="editor-container"></div>
     <div class="editor-actions">
@@ -77,6 +80,11 @@
 
   let editor = null;
   let currentFile = null;
+  let isDirty = false;
+  let lastSavedContent = '';
+  let autosaveTimer = null;
+  let isSaving = false;
+  const AUTOSAVE_DELAY = 3000; // 3 seconds
 
   function initEditor(content) {
     const container = document.getElementById('editor-container');
@@ -87,6 +95,11 @@
       extensions: [
         basicSetup,
         html(),
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            markDirty();
+          }
+        }),
         EditorView.theme({
           '&': { height: '450px' },
           '.cm-scroller': { overflow: 'auto' },
@@ -94,10 +107,78 @@
       ],
       parent: container,
     });
+
+    lastSavedContent = content || '';
+    isDirty = false;
+    updateSaveStatus('saved');
   }
 
   function getEditorContent() {
     return editor ? editor.state.doc.toString() : '';
+  }
+
+  function updateSaveStatus(status) {
+    const statusEl = document.getElementById('save-status');
+    if (!statusEl || !currentFile) {
+      if (statusEl) statusEl.style.display = 'none';
+      return;
+    }
+
+    statusEl.style.display = 'inline';
+    const messages = {
+      'saved': '✓ Saved',
+      'unsaved': '• Unsaved',
+      'saving': '↻ Saving...',
+      'error': '✗ Error'
+    };
+    statusEl.textContent = messages[status] || '';
+    statusEl.className = `save-status ${status}`;
+  }
+
+  function markDirty() {
+    const currentContent = getEditorContent();
+    if (currentContent === lastSavedContent) {
+      isDirty = false;
+      updateSaveStatus('saved');
+      return;
+    }
+    isDirty = true;
+    updateSaveStatus('unsaved');
+    scheduleAutosave();
+  }
+
+  function scheduleAutosave() {
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(() => {
+      if (isDirty && !isSaving && currentFile) {
+        performAutosave();
+      }
+    }, AUTOSAVE_DELAY);
+  }
+
+  async function performAutosave() {
+    if (!currentFile || !isDirty || isSaving) return;
+    isSaving = true;
+    updateSaveStatus('saving');
+
+    try {
+      const resp = await fetch(`/api/templates/${encodeURIComponent(currentFile)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: getEditorContent() }),
+      });
+
+      if (!resp.ok) throw new Error('Autosave failed');
+
+      lastSavedContent = getEditorContent();
+      isDirty = false;
+      updateSaveStatus('saved');
+    } catch (e) {
+      console.error('Autosave error:', e);
+      updateSaveStatus('error');
+    } finally {
+      isSaving = false;
+    }
   }
 
   function showToast(message, type) {
@@ -135,6 +216,13 @@
   }
 
   async function loadFile(filename) {
+    // Check for unsaved changes before switching files
+    if (isDirty && currentFile && currentFile !== filename) {
+      if (!confirm('You have unsaved changes. Switch files without saving?')) {
+        return;
+      }
+    }
+
     try {
       const resp = await fetch(`/api/templates/${encodeURIComponent(filename)}`);
       if (!resp.ok) throw new Error('Failed to load file');
@@ -153,16 +241,35 @@
 
   window.saveFile = async function() {
     if (!currentFile) return;
+
+    // Cancel any pending autosave
+    if (autosaveTimer) {
+      clearTimeout(autosaveTimer);
+      autosaveTimer = null;
+    }
+
+    isSaving = true;
+    updateSaveStatus('saving');
+
     try {
+      const content = getEditorContent();
       const resp = await fetch(`/api/templates/${encodeURIComponent(currentFile)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: getEditorContent() }),
+        body: JSON.stringify({ content }),
       });
+
       if (!resp.ok) throw new Error('Save failed');
+
+      lastSavedContent = content;
+      isDirty = false;
+      updateSaveStatus('saved');
       showToast('Saved successfully', 'success');
     } catch (e) {
+      updateSaveStatus('error');
       showToast('Failed to save: ' + e.message, 'error');
+    } finally {
+      isSaving = false;
     }
   };
 
@@ -241,7 +348,11 @@
       document.getElementById('editor-filename').textContent = 'No file selected';
       if (editor) editor.destroy();
       editor = null;
+      isDirty = false;
+      lastSavedContent = '';
+      if (autosaveTimer) clearTimeout(autosaveTimer);
       setButtonsEnabled(false);
+      updateSaveStatus('saved');
       document.getElementById('preview-frame').style.display = 'none';
       await loadFileList();
       showToast('Template deleted', 'success');
@@ -291,6 +402,15 @@
       showToast('Failed to send test email: ' + e.message, 'error');
     }
   };
+
+  // Warn before leaving page with unsaved changes
+  window.addEventListener('beforeunload', (e) => {
+    if (isDirty && currentFile) {
+      e.preventDefault();
+      e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+      return e.returnValue;
+    }
+  });
 
   // Initialize
   initEditor('');

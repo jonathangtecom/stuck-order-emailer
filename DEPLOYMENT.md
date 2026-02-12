@@ -107,7 +107,149 @@ docker logs --since 1h stuck-order-emailer
 - View errors with full context, stack traces, and breadcrumbs
 - Set up alerts for new errors or error spikes
 
+### Volume Mounts and File Persistence
+
+**CRITICAL**: The application requires proper Docker volume mounts to persist data (database and templates) to the host machine's disk. Without proper volume configuration, files will be lost when containers restart.
+
+#### Verifying Volume Mounts
+
+Before deployment, ensure the `data/` directory exists on the host:
+
+```bash
+# Create data directory if it doesn't exist
+mkdir -p data/templates
+
+# Set proper permissions
+chmod 755 data
+chmod 755 data/templates
+
+# Verify directory exists
+ls -la data/
+```
+
+The `docker-compose.yml` file includes this volume mount:
+```yaml
+volumes:
+  - ./data:/app/data
+```
+
+This maps the host's `./data` directory to `/app/data` inside the container.
+
+#### Testing File Persistence
+
+After deployment, verify files persist correctly:
+
+```bash
+# 1. Access the web UI and create a test template
+# 2. Save it with some content
+
+# 3. Verify file exists in container
+docker-compose exec app cat /app/data/templates/test.html
+
+# 4. Verify file exists on host
+cat data/templates/test.html
+
+# 5. Restart container
+docker-compose restart app
+
+# 6. Verify file still exists
+docker-compose exec app cat /app/data/templates/test.html
+
+# 7. Reload the template in web UI - content should be intact
+```
+
+#### Diagnostic Endpoint
+
+The application includes a diagnostic endpoint to verify volume mounts:
+
+```bash
+# Access diagnostics (must be logged in)
+curl https://your-server.com/api/system/diagnostics
+
+# Expected output:
+{
+  "templates_path": "data/templates",
+  "database_path": "data/app.db",
+  "templates_path_absolute": "/app/data/templates",
+  "database_path_absolute": "/app/data/app.db",
+  "templates_dir_exists": true,
+  "templates_dir_writable": true,
+  "database_exists": true,
+  "current_user": "root",
+  "working_directory": "/app",
+  "template_files": ["example.html"],
+  "template_files_count": 1
+}
+```
+
+**If `templates_dir_exists` is false or `templates_dir_writable` is false:**
+- Stop the container
+- Create/fix the data directory
+- Restart the container
+
+```bash
+docker-compose down
+mkdir -p data/templates
+chmod -R 755 data
+docker-compose up -d
+```
+
 ### Troubleshooting
+
+#### Templates disappear after saving
+
+**Symptoms:**
+- You save a template and see "Saved successfully"
+- When you reload the page or reopen the file, content is gone
+- File is empty or doesn't exist
+
+**Root Cause:**
+- The `data/` directory doesn't exist on the host machine
+- Files are being written to the container's ephemeral storage
+- Container restart or recreation loses the files
+
+**Solution:**
+```bash
+# Stop container
+docker-compose down
+
+# Ensure data directory exists with proper structure
+mkdir -p data/templates
+chmod 755 data data/templates
+
+# Restart
+docker-compose up -d
+
+# Verify volume mount is working
+docker-compose exec app ls -la /app/data/
+docker-compose exec app ls -la /app/data/templates/
+
+# Check diagnostic endpoint
+curl https://your-server.com/api/system/diagnostics
+```
+
+#### Autosave shows error (✗ Error)
+
+**Symptoms:**
+- Save status indicator shows red "✗ Error"
+- Autosave doesn't work, but manual save might
+- Browser console shows HTTP errors
+
+**Check:**
+1. Open browser DevTools (F12) → Console tab for JavaScript errors
+2. Check Network tab for failed POST requests to `/api/templates/`
+3. Check server logs: `docker-compose logs -f app`
+4. Access diagnostic endpoint to verify file permissions
+
+**Common Causes:**
+- Volume mount not working (files can't be written)
+- Permission issues with data directory
+- Network connectivity issues
+
+**Solution:**
+- Verify volume mounts as described above
+- Check file permissions
+- Review server logs for specific errors
 
 #### Container won't start
 

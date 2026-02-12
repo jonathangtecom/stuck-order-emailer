@@ -446,9 +446,20 @@ def api_template_save(filename):
 
     content = data.get('content', '')
     try:
+        # Write the file
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(content)
-        return jsonify({'ok': True})
+
+        # Verify the file was written correctly
+        with open(filepath, 'r', encoding='utf-8') as f:
+            written_content = f.read()
+
+        if written_content != content:
+            logger.error("File verification failed for %s: content mismatch", filename)
+            return jsonify({'error': 'File verification failed: content mismatch'}), 500
+
+        logger.info("Successfully saved and verified template %s (%d bytes)", filename, len(content))
+        return jsonify({'ok': True, 'bytes_written': len(content)})
     except Exception as e:
         logger.error("Failed to save template %s: %s", filename, e)
         return jsonify({'error': str(e)}), 500
@@ -564,6 +575,36 @@ def api_template_send_test():
     except Exception as e:
         logger.error("Test email failed: %s", e)
         return jsonify({'error': f'Error: {str(e)}'}), 500
+
+
+@app.route('/api/system/diagnostics')
+@login_required
+def api_diagnostics():
+    """Diagnostic endpoint to verify file paths and volume mounts."""
+    import pwd
+
+    diagnostics = {
+        'templates_path': TEMPLATES_PATH,
+        'database_path': DATABASE_PATH,
+        'templates_path_absolute': os.path.abspath(TEMPLATES_PATH),
+        'database_path_absolute': os.path.abspath(DATABASE_PATH),
+        'templates_dir_exists': os.path.exists(TEMPLATES_PATH),
+        'templates_dir_writable': os.access(TEMPLATES_PATH, os.W_OK),
+        'database_exists': os.path.exists(DATABASE_PATH),
+        'current_user': pwd.getpwuid(os.getuid()).pw_name,
+        'working_directory': os.getcwd(),
+    }
+
+    # Check actual files in templates directory
+    if os.path.exists(TEMPLATES_PATH):
+        try:
+            files = os.listdir(TEMPLATES_PATH)
+            diagnostics['template_files'] = files
+            diagnostics['template_files_count'] = len(files)
+        except Exception as e:
+            diagnostics['template_files_error'] = str(e)
+
+    return jsonify(diagnostics)
 
 
 # ── Logs ─────────────────────────────────────────────────────

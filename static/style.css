@@ -248,3 +248,25 @@ table.compact th {
 .toast.error {
   background-color: #dc3545;
 }
+
+/* Save status indicator */
+.save-status {
+  font-size: 0.85rem;
+  color: var(--pico-muted-color);
+}
+
+.save-status.saved {
+  color: #28a745;
+}
+
+.save-status.unsaved {
+  color: #ffc107;
+}
+
+.save-status.saving {
+  color: #17a2b8;
+}
+
+.save-status.error {
+  color: #dc3545;
+}
