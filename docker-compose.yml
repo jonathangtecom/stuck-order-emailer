@@ -5,6 +5,8 @@ services:
       args:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
     restart: unless-stopped
+    expose:
+      - "3000"
     volumes:
       - ./data:/app/data
     env_file:
@@ -12,3 +14,4 @@ services:
     environment:
       - DATABASE_PATH=/app/data/app.db
       - TEMPLATES_PATH=/app/data/templates
+      - PORT=3000
