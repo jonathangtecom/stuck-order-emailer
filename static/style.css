@@ -270,3 +270,67 @@ table.compact th {
 .save-status.error {
   color: #dc3545;
 }
+
+/* ── Dry Run Page ─────────────────────────────────────────── */
+
+.store-accordion {
+  border: 1px solid var(--pico-muted-border-color, #dee2e6);
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+  overflow: hidden;
+}
+
+.store-accordion > summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  font-weight: 600;
+  background: var(--pico-card-background-color, #fff);
+}
+
+.store-accordion > summary:hover {
+  background: var(--pico-secondary-focus, #f0f0f0);
+}
+
+.store-accordion-name {
+  flex: 1;
+}
+
+.store-accordion-content {
+  padding: 0 1rem 1rem;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+.badge-send {
+  background-color: #1095c1;
+  color: #fff;
+}
+
+.badge-error {
+  background-color: #dc3545;
+  color: #fff;
+}
+
+.badge-clear {
+  background-color: #e9ecef;
+  color: #6c757d;
+}
+
+.store-error-message {
+  color: var(--pico-del-color, #c62828);
+  padding: 0.5rem 0;
+}
+
+.dry-run-header {
+  margin-bottom: 1rem;
+}

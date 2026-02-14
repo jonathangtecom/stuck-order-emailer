@@ -28,15 +28,13 @@
   </div>
 </div>
 
-<div style="display: flex; gap: 0.75rem; margin-bottom: 1.5rem;">
-  <button id="btn-dry-run" class="secondary outline" onclick="runProcess(true)">Dry Run</button>
-  <button id="btn-run" onclick="runProcess(false)">Run Now (Send Emails)</button>
+<div style="margin-bottom: 1.5rem;">
+  <button id="btn-run" onclick="runProcess()">Run Now (Send Emails)</button>
 </div>
 
 <div id="run-results" style="display: none;">
   <h3 id="run-results-title"></h3>
   <pre id="run-results-body" style="max-height: 400px; overflow: auto; padding: 1rem; background: var(--pico-code-background-color); border-radius: 0.25rem; white-space: pre-wrap;"></pre>
-  <div id="dry-run-results-body" style="display: none;"></div>
 </div>
 
 <h3>Stores</h3>
@@ -73,19 +71,18 @@
 
 {% block scripts %}
 <script>
-async function runProcess(dryRun) {
-  const btn = dryRun ? document.getElementById('btn-dry-run') : document.getElementById('btn-run');
+async function runProcess() {
+  const btn = document.getElementById('btn-run');
   const origText = btn.textContent;
 
-  if (!dryRun && !confirm('This will send real emails to customers. Continue?')) return;
+  if (!confirm('This will send real emails to customers. Continue?')) return;
 
   btn.disabled = true;
   btn.setAttribute('aria-busy', 'true');
-  btn.textContent = dryRun ? 'Running dry run...' : 'Sending emails...';
+  btn.textContent = 'Sending emails...';
 
   try {
-    const url = dryRun ? '/api/run?dry_run=1' : '/api/run';
-    const resp = await fetch(url, {method: 'POST'});
+    const resp = await fetch('/api/run', {method: 'POST'});
     const data = await resp.json();
 
     if (!resp.ok) {
@@ -93,23 +90,9 @@ async function runProcess(dryRun) {
       return;
     }
 
-    const resultsDiv = document.getElementById('run-results');
-    const title = document.getElementById('run-results-title');
-    const preBody = document.getElementById('run-results-body');
-    const dryBody = document.getElementById('dry-run-results-body');
-
-    title.textContent = dryRun ? 'Dry Run Results (no emails sent)' : 'Run Results';
-
-    if (dryRun) {
-      preBody.style.display = 'none';
-      dryBody.innerHTML = formatDryRunResults(data);
-      dryBody.style.display = 'block';
-    } else {
-      dryBody.style.display = 'none';
-      preBody.textContent = formatResults(data);
-      preBody.style.display = 'block';
-    }
-    resultsDiv.style.display = 'block';
+    document.getElementById('run-results-title').textContent = 'Run Results';
+    document.getElementById('run-results-body').textContent = formatResults(data);
+    document.getElementById('run-results').style.display = 'block';
   } catch (e) {
     alert('Request failed: ' + e.message);
   } finally {
@@ -122,7 +105,7 @@ async function runProcess(dryRun) {
 function formatResults(data) {
   let lines = [];
   lines.push(`Stores processed: ${data.processed}`);
-  lines.push(`Emails ${data.dry_run ? 'would send' : 'sent'}: ${data.emails_sent}`);
+  lines.push(`Emails sent: ${data.emails_sent}`);
   lines.push(`Skipped (already sent): ${data.skipped}`);
   lines.push(`Errors: ${data.errors}`);
   lines.push('');
@@ -132,81 +115,10 @@ function formatResults(data) {
     if (detail.error) {
       lines.push(`  ERROR: ${detail.error}`);
     } else {
-      lines.push(`  ${data.dry_run ? 'Would send' : 'Sent'}: ${detail.sent}, Skipped: ${detail.skipped}`);
-      if (detail.would_send) {
-        for (const email of detail.would_send) {
-          lines.push(`  -> ${email.order_number} | ${email.customer_email} | ${email.tracking_number} | ${email.tracking_status} | ${email.days_waiting} days | Subject: ${email.subject}`);
-        }
-      }
+      lines.push(`  Sent: ${detail.sent}, Skipped: ${detail.skipped}`);
     }
   }
   return lines.join('\n');
-}
-
-function formatDryRunResults(data) {
-  let html = '';
-
-  // Summary counts
-  html += '<p>';
-  html += '<strong>Stores processed:</strong> ' + data.processed;
-  html += ' &nbsp;|&nbsp; <strong>Would send:</strong> ' + data.emails_sent;
-  html += ' &nbsp;|&nbsp; <strong>Skipped:</strong> ' + data.skipped;
-  if (data.errors > 0) html += ' &nbsp;|&nbsp; <strong>Errors:</strong> ' + data.errors;
-  html += '</p>';
-
-  if (data.emails_sent === 0 && data.errors === 0) {
-    html += '<p>No emails to send. All orders are either already emailed, too recent, or not stuck.</p>';
-    return html;
-  }
-
-  for (const detail of (data.details || [])) {
-    if (detail.error) {
-      html += '<h4>' + esc(detail.store) + ' — <span style="color: var(--pico-del-color, #c62828);">ERROR</span></h4>';
-      html += '<p style="color: var(--pico-del-color, #c62828);">' + esc(detail.error) + '</p>';
-      continue;
-    }
-
-    const count = detail.would_send ? detail.would_send.length : 0;
-    html += '<h4>' + esc(detail.store) + ' (' + count + ' email' + (count !== 1 ? 's' : '') + ' would send)</h4>';
-
-    if (!detail.would_send || detail.would_send.length === 0) {
-      html += '<p>No emails to send for this store.</p>';
-      continue;
-    }
-
-    for (const email of detail.would_send) {
-      html += '<details style="margin-bottom: 0.5rem;">';
-      html += '<summary style="cursor: pointer;">';
-      html += '<strong>' + esc(email.order_number) + '</strong>';
-      html += ' &mdash; ' + esc(email.customer_name);
-      html += ' (' + esc(email.customer_email) + ')';
-      html += ' &mdash; ' + email.days_waiting + ' days';
-      html += ' &mdash; <code>' + esc(email.tracking_status || 'UNFULFILLED') + '</code>';
-      html += '</summary>';
-      html += '<div style="padding: 0.75rem 1rem; border-left: 3px solid var(--pico-primary, #1095c1);">';
-      html += '<p style="margin-bottom: 0.5rem;"><strong>Subject:</strong> ' + esc(email.subject) + '</p>';
-      html += '<p style="margin-bottom: 0.5rem;"><strong>To:</strong> ' + esc(email.customer_email) + ' &nbsp; <strong>Tracking:</strong> ' + esc(email.tracking_number || 'N/A') + '</p>';
-      html += '<iframe sandbox="allow-same-origin" srcdoc="' + escAttr(email.rendered_body || '') + '" ';
-      html += 'style="width: 100%; height: 400px; border: 1px solid var(--pico-muted-border-color, #dee2e6); border-radius: 4px; background: #fff;" ';
-      html += 'title="Email preview for ' + escAttr(email.order_number) + '"></iframe>';
-      html += '</div>';
-      html += '</details>';
-    }
-  }
-
-  return html;
-}
-
-// HTML-escape for text content
-function esc(str) {
-  const el = document.createElement('span');
-  el.textContent = str ?? '';
-  return el.innerHTML;
-}
-
-// Escape for HTML attribute context (srcdoc)
-function escAttr(str) {
-  return (str ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 </script>
 {% endblock %}

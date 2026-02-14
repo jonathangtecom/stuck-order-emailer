@@ -266,6 +266,15 @@ def dashboard():
                            enabled_stores=enabled)
 
 
+# ── Dry Run ──────────────────────────────────────────────────
+
+@app.route('/dry-run')
+@login_required
+def dry_run():
+    return render_template('ui/dry_run.html',
+                           active_page='dry_run')
+
+
 # ── Store CRUD ───────────────────────────────────────────────
 
 @app.route('/stores')

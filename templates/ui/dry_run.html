@@ -1,0 +1,285 @@
+{% extends "ui/layout.html" %}
+
+{% block title %}Dry Run — Stuck Order Emailer{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+  <h2 style="margin-bottom: 0;">Dry Run</h2>
+  <button id="btn-dry-run" onclick="runDryRun()">Run Dry Run</button>
+</div>
+
+<p id="dry-run-description">
+  Simulates the full email pipeline without sending any emails.
+  Shows exactly which customers would receive an email.
+</p>
+
+<!-- Loading state -->
+<div id="loading-state" style="display: none; text-align: center; padding: 2rem 0;">
+  <p aria-busy="true">Running dry run across all enabled stores... This may take a minute.</p>
+</div>
+
+<!-- Error state -->
+<div id="error-state" style="display: none;">
+  <div class="flash-error" role="alert">
+    <strong>Dry run failed:</strong> <span id="error-message"></span>
+  </div>
+  <button class="secondary outline" onclick="runDryRun()">Try Again</button>
+</div>
+
+<!-- Results -->
+<div id="results-section" style="display: none;">
+  <div class="dry-run-header">
+    <small id="results-timestamp" style="color: var(--pico-muted-color);"></small>
+  </div>
+
+  <div class="stats-grid" id="summary-stats"></div>
+
+  <div id="store-sections"></div>
+
+  <div id="empty-state" style="display: none; text-align: center; padding: 2rem 0;">
+    <h3>All clear</h3>
+    <p>No emails would be sent right now. All orders are either already emailed, too recent, or tracking normally.</p>
+  </div>
+</div>
+
+<!-- Email Preview Modal -->
+<dialog id="email-preview-modal">
+  <article style="max-width: 800px; width: 90vw;">
+    <header>
+      <button aria-label="Close" rel="prev" onclick="closePreviewModal()"></button>
+      <h3 id="preview-modal-title">Email Preview</h3>
+    </header>
+    <div style="margin-bottom: 0.75rem;">
+      <p id="preview-meta" style="margin-bottom: 0; font-size: 0.9rem; color: var(--pico-muted-color);"></p>
+    </div>
+    <iframe
+      id="preview-iframe"
+      class="preview-frame"
+      sandbox="allow-same-origin"
+      title="Email preview"
+      style="margin-top: 0; width: 100%; height: 450px; border: 1px solid var(--pico-muted-border-color, #dee2e6); border-radius: 4px; background: #fff;">
+    </iframe>
+    <footer>
+      <button class="secondary" onclick="closePreviewModal()">Close</button>
+    </footer>
+  </article>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const emailBodies = {};
+
+async function runDryRun() {
+  const btn = document.getElementById('btn-dry-run');
+  const desc = document.getElementById('dry-run-description');
+  const loading = document.getElementById('loading-state');
+  const errorState = document.getElementById('error-state');
+  const results = document.getElementById('results-section');
+
+  btn.disabled = true;
+  btn.setAttribute('aria-busy', 'true');
+  btn.textContent = 'Running...';
+  desc.style.display = 'none';
+  loading.style.display = 'block';
+  errorState.style.display = 'none';
+  results.style.display = 'none';
+
+  try {
+    const resp = await fetch('/api/run?dry_run=1', {method: 'POST'});
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      throw new Error(data.error || 'Unknown error');
+    }
+
+    renderResults(data);
+  } catch (e) {
+    document.getElementById('error-message').textContent = e.message;
+    errorState.style.display = 'block';
+  } finally {
+    loading.style.display = 'none';
+    btn.disabled = false;
+    btn.removeAttribute('aria-busy');
+    btn.textContent = 'Run Dry Run';
+  }
+}
+
+function renderResults(data) {
+  const results = document.getElementById('results-section');
+  const emptyState = document.getElementById('empty-state');
+  const storeSections = document.getElementById('store-sections');
+
+  const now = new Date();
+  document.getElementById('results-timestamp').textContent =
+    'Report generated ' + now.toLocaleDateString() + ' at ' + now.toLocaleTimeString();
+
+  document.getElementById('summary-stats').innerHTML =
+    '<div class="stat-card"><p class="stat-value">' + data.processed + '</p><p class="stat-label">Stores Processed</p></div>' +
+    '<div class="stat-card"><p class="stat-value">' + data.emails_sent + '</p><p class="stat-label">Emails Would Send</p></div>' +
+    '<div class="stat-card"><p class="stat-value">' + data.skipped + '</p><p class="stat-label">Skipped</p></div>' +
+    '<div class="stat-card"><p class="stat-value">' + data.errors + '</p><p class="stat-label">Errors</p></div>';
+
+  storeSections.innerHTML = '';
+  Object.keys(emailBodies).forEach(k => delete emailBodies[k]);
+
+  if (data.emails_sent === 0 && data.errors === 0) {
+    emptyState.style.display = 'block';
+    storeSections.style.display = 'none';
+  } else {
+    emptyState.style.display = 'none';
+    storeSections.style.display = 'block';
+    renderStoreSections(data.details);
+  }
+
+  results.style.display = 'block';
+}
+
+function renderStoreSections(details) {
+  const container = document.getElementById('store-sections');
+
+  for (let si = 0; si < details.length; si++) {
+    const detail = details[si];
+    const section = document.createElement('details');
+    section.classList.add('store-accordion');
+    if (si === 0) section.setAttribute('open', '');
+
+    const summary = document.createElement('summary');
+
+    const nameSpan = document.createElement('span');
+    nameSpan.classList.add('store-accordion-name');
+    nameSpan.textContent = detail.store;
+    summary.appendChild(nameSpan);
+
+    const badge = document.createElement('span');
+    if (detail.error) {
+      badge.classList.add('badge', 'badge-error');
+      badge.textContent = 'ERROR';
+    } else {
+      const count = detail.would_send ? detail.would_send.length : 0;
+      if (count === 0) {
+        badge.classList.add('badge', 'badge-clear');
+        badge.textContent = '0 emails';
+      } else {
+        badge.classList.add('badge', 'badge-send');
+        badge.textContent = count + ' email' + (count !== 1 ? 's' : '');
+      }
+    }
+    summary.appendChild(badge);
+    section.appendChild(summary);
+
+    const content = document.createElement('div');
+    content.classList.add('store-accordion-content');
+
+    if (detail.error) {
+      const errorP = document.createElement('p');
+      errorP.classList.add('store-error-message');
+      errorP.textContent = detail.error;
+      content.appendChild(errorP);
+    } else if (!detail.would_send || detail.would_send.length === 0) {
+      const emptyP = document.createElement('p');
+      emptyP.style.color = 'var(--pico-muted-color)';
+      emptyP.textContent = 'No emails to send for this store. All orders are up to date.';
+      content.appendChild(emptyP);
+    } else {
+      if (detail.skipped > 0) {
+        const skippedP = document.createElement('p');
+        skippedP.style.fontSize = '0.9rem';
+        skippedP.style.color = 'var(--pico-muted-color)';
+        skippedP.textContent = detail.skipped + ' order' + (detail.skipped !== 1 ? 's' : '') + ' skipped (already emailed)';
+        content.appendChild(skippedP);
+      }
+
+      const table = document.createElement('table');
+      table.classList.add('compact');
+      table.setAttribute('role', 'grid');
+
+      const thead = document.createElement('thead');
+      thead.innerHTML = '<tr><th>Order</th><th>Customer</th><th>Days Waiting</th><th>Status</th><th></th></tr>';
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+
+      for (let oi = 0; oi < detail.would_send.length; oi++) {
+        const email = detail.would_send[oi];
+        const key = si + '-' + oi;
+        emailBodies[key] = {
+          subject: email.subject,
+          customerEmail: email.customer_email,
+          customerName: email.customer_name,
+          trackingNumber: email.tracking_number,
+          orderNumber: email.order_number,
+          renderedBody: email.rendered_body,
+        };
+
+        const tr = document.createElement('tr');
+
+        const tdOrder = document.createElement('td');
+        const orderStrong = document.createElement('strong');
+        orderStrong.textContent = email.order_number;
+        tdOrder.appendChild(orderStrong);
+        tr.appendChild(tdOrder);
+
+        const tdCustomer = document.createElement('td');
+        tdCustomer.textContent = email.customer_name;
+        const emailSmall = document.createElement('small');
+        emailSmall.style.display = 'block';
+        emailSmall.style.color = 'var(--pico-muted-color)';
+        emailSmall.textContent = email.customer_email;
+        tdCustomer.appendChild(emailSmall);
+        tr.appendChild(tdCustomer);
+
+        const tdDays = document.createElement('td');
+        tdDays.textContent = email.days_waiting + ' days';
+        tr.appendChild(tdDays);
+
+        const tdStatus = document.createElement('td');
+        const statusCode = document.createElement('code');
+        statusCode.textContent = email.tracking_status || 'UNFULFILLED';
+        tdStatus.appendChild(statusCode);
+        tr.appendChild(tdStatus);
+
+        const tdPreview = document.createElement('td');
+        const previewBtn = document.createElement('button');
+        previewBtn.classList.add('secondary', 'outline');
+        previewBtn.style.fontSize = '0.8rem';
+        previewBtn.style.padding = '0.25rem 0.5rem';
+        previewBtn.setAttribute('data-key', key);
+        previewBtn.textContent = 'Preview';
+        previewBtn.addEventListener('click', function() {
+          openPreviewModal(this.getAttribute('data-key'));
+        });
+        tdPreview.appendChild(previewBtn);
+        tr.appendChild(tdPreview);
+
+        tbody.appendChild(tr);
+      }
+
+      table.appendChild(tbody);
+      content.appendChild(table);
+    }
+
+    section.appendChild(content);
+    container.appendChild(section);
+  }
+}
+
+function openPreviewModal(key) {
+  const data = emailBodies[key];
+  if (!data) return;
+
+  document.getElementById('preview-modal-title').textContent =
+    'Email Preview: ' + data.orderNumber;
+  document.getElementById('preview-meta').textContent =
+    'To: ' + data.customerEmail + '  |  Subject: ' + data.subject;
+
+  document.getElementById('preview-iframe').srcdoc = data.renderedBody || '';
+  document.getElementById('email-preview-modal').showModal();
+}
+
+function closePreviewModal() {
+  document.getElementById('email-preview-modal').close();
+  document.getElementById('preview-iframe').srcdoc = '';
+}
+</script>
+{% endblock %}
