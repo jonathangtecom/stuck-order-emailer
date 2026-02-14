@@ -312,6 +312,11 @@ class TestEndToEndPipeline:
         assert 'would_send' in result
         assert len(result.get('would_send', [])) == 1
 
+        # Should include rendered body with personalized content
+        would_send_item = result['would_send'][0]
+        assert 'rendered_body' in would_send_item
+        assert would_send_item['rendered_body']  # Not empty
+
         # SendGrid should NOT be called
         mock_sendgrid.assert_not_called()
 

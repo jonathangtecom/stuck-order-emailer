@@ -271,6 +271,7 @@ def _process_order(store, order, days_threshold, template_html, dry_run=False):
             'tracking_status': tracking_status,
             'days_waiting': days_waiting,
             'subject': rendered_subject,
+            'rendered_body': rendered_body,
         }
 
     # ── Live: send email via SendGrid ──
