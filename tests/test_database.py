@@ -159,6 +159,44 @@ class TestStoreCRUD:
         store = database.get_store(store_id)
         assert store['shopify_store_url'] == 'test.myshopify.com'
 
+    def test_create_store_with_send_time(self):
+        store_id = database.create_store(
+            _make_store(send_hour=14, send_minute=30)
+        )
+        store = database.get_store(store_id)
+        assert store['send_hour'] == 14
+        assert store['send_minute'] == 30
+
+    def test_create_store_default_send_time(self):
+        store_id = database.create_store(_make_store())
+        store = database.get_store(store_id)
+        assert store['send_hour'] == 9
+        assert store['send_minute'] == 0
+
+    def test_create_store_midnight_send_time(self):
+        """send_hour=0 and send_minute=0 must not be treated as falsy."""
+        store_id = database.create_store(
+            _make_store(send_hour=0, send_minute=0)
+        )
+        store = database.get_store(store_id)
+        assert store['send_hour'] == 0
+        assert store['send_minute'] == 0
+
+    def test_update_store_send_time(self):
+        store_id = database.create_store(_make_store())
+        database.update_store(store_id, {'send_hour': 15, 'send_minute': 45})
+        store = database.get_store(store_id)
+        assert store['send_hour'] == 15
+        assert store['send_minute'] == 45
+
+    def test_update_store_send_time_to_zero(self):
+        """Updating send_hour to 0 must work (midnight UTC)."""
+        store_id = database.create_store(_make_store(send_hour=12, send_minute=30))
+        database.update_store(store_id, {'send_hour': 0, 'send_minute': 0})
+        store = database.get_store(store_id)
+        assert store['send_hour'] == 0
+        assert store['send_minute'] == 0
+
 
 class TestSentEmails:
     def _create_store_for_fk(self):

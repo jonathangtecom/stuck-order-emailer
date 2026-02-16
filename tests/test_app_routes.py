@@ -55,7 +55,7 @@ def _create_store(auth_client, name='Test Store'):
 
 class TestAuth:
     def test_unauthenticated_redirects(self, client):
-        for path in ['/', '/stores', '/templates', '/logs', '/stores/new']:
+        for path in ['/', '/stores', '/templates', '/logs', '/stores/new', '/dry-run']:
             resp = client.get(path)
             assert resp.status_code == 302
             assert '/login' in resp.headers['Location']
@@ -244,6 +244,111 @@ class TestTemplateAPI:
         resp = auth_client.post('/api/templates/my%20template.html',
                                 json={'content': 'x'})
         assert resp.status_code == 400
+
+
+class TestDryRunPage:
+    def test_dry_run_page_loads(self, auth_client):
+        resp = auth_client.get('/dry-run')
+        assert resp.status_code == 200
+        assert b'Dry Run' in resp.data
+
+    def test_dry_run_requires_auth(self, client):
+        resp = client.get('/dry-run')
+        assert resp.status_code == 302
+        assert '/login' in resp.headers['Location']
+
+
+class TestStoreScheduling:
+    def test_create_store_with_send_time(self, auth_client):
+        resp = auth_client.post('/stores', data={
+            'name': 'Scheduled Store',
+            'parcel_panel_api_key': 'pp-key',
+            'shopify_store_url': 'test.myshopify.com',
+            'shopify_admin_api_token': 'shpat_test',
+            'from_email': 'test@example.com',
+            'from_name': 'Test Team',
+            'email_subject': 'Order update',
+            'email_template': 'example.html',
+            'days_threshold': '8',
+            'send_time': '14:30',
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        store = database.get_store('scheduled-store')
+        assert store['send_hour'] == 14
+        assert store['send_minute'] == 30
+
+    def test_create_store_default_send_time(self, auth_client):
+        _create_store(auth_client, 'Default Time')
+        store = database.get_store('default-time')
+        assert store['send_hour'] == 9
+        assert store['send_minute'] == 0
+
+    def test_update_store_send_time(self, auth_client):
+        _create_store(auth_client)
+        auth_client.post('/stores/test-store', data={
+            'name': 'Test Store',
+            'from_email': 'test@example.com',
+            'from_name': 'Test Team',
+            'email_subject': 'Subject',
+            'email_template': 'example.html',
+            'days_threshold': '8',
+            'send_time': '23:45',
+        }, follow_redirects=True)
+        store = database.get_store('test-store')
+        assert store['send_hour'] == 23
+        assert store['send_minute'] == 45
+
+    def test_create_store_midnight_time(self, auth_client):
+        """send_time 00:00 must correctly store hour=0, minute=0."""
+        auth_client.post('/stores', data={
+            'name': 'Midnight Store',
+            'parcel_panel_api_key': 'pp-key',
+            'shopify_store_url': 'test.myshopify.com',
+            'shopify_admin_api_token': 'shpat_test',
+            'from_email': 'test@example.com',
+            'from_name': 'Test Team',
+            'email_subject': 'Order update',
+            'email_template': 'example.html',
+            'days_threshold': '8',
+            'send_time': '00:00',
+        }, follow_redirects=True)
+        store = database.get_store('midnight-store')
+        assert store['send_hour'] == 0
+        assert store['send_minute'] == 0
+
+    def test_edit_form_shows_send_time(self, auth_client):
+        auth_client.post('/stores', data={
+            'name': 'Time Edit',
+            'parcel_panel_api_key': 'pp-key',
+            'shopify_store_url': 'test.myshopify.com',
+            'shopify_admin_api_token': 'shpat_test',
+            'from_email': 'test@example.com',
+            'from_name': 'Test Team',
+            'email_subject': 'Subject',
+            'email_template': 'example.html',
+            'days_threshold': '8',
+            'send_time': '15:30',
+        }, follow_redirects=True)
+        resp = auth_client.get('/stores/time-edit/edit')
+        assert b'15:30' in resp.data
+
+    def test_malformed_send_time_defaults(self, auth_client):
+        """Malformed time input should default to 09:00."""
+        auth_client.post('/stores', data={
+            'name': 'Bad Time',
+            'parcel_panel_api_key': 'pp-key',
+            'shopify_store_url': 'test.myshopify.com',
+            'shopify_admin_api_token': 'shpat_test',
+            'from_email': 'test@example.com',
+            'from_name': 'Test Team',
+            'email_subject': 'Subject',
+            'email_template': 'example.html',
+            'days_threshold': '8',
+            'send_time': 'garbage',
+        }, follow_redirects=True)
+        store = database.get_store('bad-time')
+        assert store['send_hour'] == 9
+        assert store['send_minute'] == 0
 
 
 class TestLogs:
