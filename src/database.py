@@ -49,6 +49,8 @@ def init_db():
                 email_subject TEXT NOT NULL,
                 email_template TEXT NOT NULL,
                 days_threshold INTEGER DEFAULT 8,
+                send_hour INTEGER DEFAULT 9,
+                send_minute INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -71,6 +73,14 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_sent_emails_store ON sent_emails(store_id);
             CREATE INDEX IF NOT EXISTS idx_sent_emails_sent_at ON sent_emails(sent_at);
         """)
+
+        # Migrations for existing databases
+        for col, default in [('send_hour', 9), ('send_minute', 0)]:
+            try:
+                conn.execute(f"ALTER TABLE stores ADD COLUMN {col} INTEGER DEFAULT {default}")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
     logger.info("Database initialized at %s", _get_db_path())
 
 
@@ -119,8 +129,8 @@ def create_store(data):
         conn.execute("""
             INSERT INTO stores (id, name, enabled, parcel_panel_api_key, shopify_store_url,
                 shopify_admin_api_token, from_email, from_name, email_subject,
-                email_template, days_threshold)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                email_template, days_threshold, send_hour, send_minute)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             store_id,
             data['name'].strip(),
@@ -133,6 +143,8 @@ def create_store(data):
             data['email_subject'].strip(),
             data['email_template'].strip(),
             int(data.get('days_threshold', 8)),
+            int(data.get('send_hour', 9)),
+            int(data.get('send_minute', 0)),
         ))
     return store_id
 
@@ -144,13 +156,14 @@ def update_store(store_id, data):
         'name', 'parcel_panel_api_key', 'shopify_store_url',
         'shopify_admin_api_token', 'from_email', 'from_name',
         'email_subject', 'email_template', 'days_threshold',
+        'send_hour', 'send_minute',
     ]
     for field in updatable:
-        if field in data and data[field]:
+        if field in data and data[field] is not None and data[field] != '':
             val = data[field].strip() if isinstance(data[field], str) else data[field]
             if field == 'shopify_store_url' and isinstance(val, str):
                 val = val.rstrip('/')
-            if field == 'days_threshold':
+            if field in ('days_threshold', 'send_hour', 'send_minute'):
                 val = int(val)
             fields.append(f"{field}=?")
             values.append(val)

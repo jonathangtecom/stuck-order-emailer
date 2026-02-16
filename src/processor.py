@@ -67,6 +67,20 @@ def process_all_stores(dry_run=False):
     return summary
 
 
+def process_single_store_by_id(store_id):
+    """Process a single store by its ID. Used by the per-store scheduler."""
+    store = database.get_store(store_id)
+    if not store:
+        logger.warning("Scheduled job for store %s: store not found, skipping", store_id)
+        return {'error': f'Store {store_id} not found'}
+    if not store['enabled']:
+        logger.info("Scheduled job for store %s: store is disabled, skipping", store_id)
+        return {'error': f'Store {store_id} is disabled'}
+
+    logger.info("Scheduled processing for store: %s", store['name'])
+    return _process_store_with_retry(store)
+
+
 STORE_RETRY_ATTEMPTS = int(os.environ.get('STORE_RETRY_ATTEMPTS', 3))
 STORE_RETRY_BASE_DELAY = int(os.environ.get('STORE_RETRY_BASE_DELAY', 60))  # seconds
 

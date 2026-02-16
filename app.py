@@ -156,37 +156,76 @@ database.init_db()
 
 logger.info("App starting — DB: %s, Templates: %s", DATABASE_PATH, TEMPLATES_PATH)
 
-# ── Scheduler ────────────────────────────────────────────────
+# ── Scheduler (per-store) ─────────────────────────────────────
 
 SCHEDULE_HOUR = int(os.environ.get('SCHEDULE_HOUR', '9'))
 SCHEDULE_MINUTE = int(os.environ.get('SCHEDULE_MINUTE', '0'))
 
+scheduler = BackgroundScheduler()
 
-def _scheduled_process_all_stores():
-    """Wrapper for scheduled job with Sentry error tracking."""
+
+def _scheduled_process_single_store(store_id):
+    """Wrapper for per-store scheduled job with Sentry error tracking."""
     try:
-        return processor.process_all_stores()
+        return processor.process_single_store_by_id(store_id)
     except Exception as e:
         if SENTRY_DSN:
             sentry_sdk.capture_exception(e)
-        logger.error("Scheduled processing failed: %s", e, exc_info=True)
+        logger.error("Scheduled processing failed for store %s: %s", store_id, e, exc_info=True)
         raise
 
 
-scheduler = BackgroundScheduler()
-scheduler.add_job(
-    _scheduled_process_all_stores,
-    trigger='cron',
-    hour=SCHEDULE_HOUR,
-    minute=SCHEDULE_MINUTE,
-    id='daily_order_check',
-    misfire_grace_time=3600,
-)
+def _store_job_id(store_id):
+    return f'store_{store_id}'
+
+
+def _register_store_job(store):
+    """Add or replace a cron job for an enabled store."""
+    if not store or not store.get('enabled'):
+        return
+    job_id = _store_job_id(store['id'])
+    hour = store.get('send_hour', SCHEDULE_HOUR)
+    minute = store.get('send_minute', SCHEDULE_MINUTE)
+
+    # Remove existing job first (if any) to update schedule
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+
+    scheduler.add_job(
+        _scheduled_process_single_store,
+        trigger='cron',
+        hour=hour,
+        minute=minute,
+        args=[store['id']],
+        id=job_id,
+        misfire_grace_time=3600,
+    )
+    logger.info("Scheduled store '%s' at %02d:%02d UTC", store['name'], hour, minute)
+
+
+def _unregister_store_job(store_id):
+    """Remove a store's scheduled job if it exists."""
+    try:
+        scheduler.remove_job(_store_job_id(store_id))
+        logger.info("Unregistered scheduled job for store %s", store_id)
+    except Exception:
+        pass  # Job didn't exist
+
+
+def _sync_all_store_jobs():
+    """Register jobs for all enabled stores. Called on startup."""
+    stores = database.get_enabled_stores()
+    for store in stores:
+        _register_store_job(store)
+    logger.info("Scheduler synced — %d store job(s) registered", len(stores))
+
 
 # Avoid starting scheduler twice in Flask debug mode (reloader spawns a child process)
 if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
     scheduler.start()
-    logger.info("Scheduler started — daily run at %02d:%02d", SCHEDULE_HOUR, SCHEDULE_MINUTE)
+    _sync_all_store_jobs()
 
 
 # ── Security Headers ──────────────────────────────────────────
@@ -324,6 +363,7 @@ def store_create():
 
     try:
         store_id = database.create_store(data)
+        _register_store_job(database.get_store(store_id))
         flash(f'Store "{data["name"]}" created (ID: {store_id}).', 'success')
     except Exception as e:
         logger.error("Failed to create store: %s", e)
@@ -378,6 +418,11 @@ def store_update(store_id):
 
     try:
         database.update_store(store_id, data)
+        updated_store = database.get_store(store_id)
+        if updated_store and updated_store['enabled']:
+            _register_store_job(updated_store)
+        else:
+            _unregister_store_job(store_id)
         flash('Store updated.', 'success')
     except Exception as e:
         logger.error("Failed to update store %s: %s", store_id, e)
@@ -392,6 +437,11 @@ def store_toggle(store_id):
     new_state = database.toggle_store(store_id)
     if new_state is None:
         return jsonify({'error': 'Store not found'}), 404
+    if new_state:
+        store = database.get_store(store_id)
+        _register_store_job(store)
+    else:
+        _unregister_store_job(store_id)
     return jsonify({'enabled': new_state})
 
 
@@ -400,6 +450,7 @@ def store_toggle(store_id):
 def store_delete(store_id):
     store = database.get_store(store_id)
     if store:
+        _unregister_store_job(store_id)
         database.delete_store_cascade(store_id)
         flash(f'Store "{store["name"]}" deleted.', 'success')
     else:
@@ -721,6 +772,15 @@ def api_run():
 
 def _extract_store_form(form):
     """Extract store data from a form submission."""
+    # Parse "HH:MM" time field into send_hour/send_minute
+    send_time = form.get('send_time', '09:00').strip()
+    try:
+        parts = send_time.split(':')
+        send_hour = max(0, min(23, int(parts[0])))
+        send_minute = max(0, min(59, int(parts[1])))
+    except (ValueError, IndexError):
+        send_hour, send_minute = 9, 0
+
     return {
         'id': form.get('id', '').strip(),
         'name': form.get('name', '').strip(),
@@ -732,6 +792,8 @@ def _extract_store_form(form):
         'email_subject': form.get('email_subject', '').strip(),
         'email_template': form.get('email_template', '').strip(),
         'days_threshold': form.get('days_threshold', '8').strip(),
+        'send_hour': send_hour,
+        'send_minute': send_minute,
     }
 
 

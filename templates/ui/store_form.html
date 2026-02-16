@@ -79,12 +79,20 @@
     </label>
   </fieldset>
 
-  <label>
-    Days Threshold
-    <input type="number" name="days_threshold" min="1" max="60"
-           value="{{ store.days_threshold if store else 8 }}">
-    <small>Send email if tracking is stuck for this many days.</small>
-  </label>
+  <div class="grid">
+    <label>
+      Days Threshold
+      <input type="number" name="days_threshold" min="1" max="60"
+             value="{{ store.days_threshold if store else 8 }}">
+      <small>Send email if tracking is stuck for this many days.</small>
+    </label>
+    <label>
+      Daily Send Time (UTC)
+      <input type="time" name="send_time"
+             value="{{ '%02d:%02d' | format(store.send_hour|default(9), store.send_minute|default(0)) if store else '09:00' }}">
+      <small>When to check and send emails daily. Time is in UTC.</small>
+    </label>
+  </div>
 
   <div style="display: flex; gap: 1rem;">
     <button type="submit">{{ 'Save Changes' if store else 'Create Store' }}</button>
