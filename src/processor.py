@@ -263,6 +263,14 @@ def _process_order(store, order, days_threshold, template_html, dry_run=False):
     fulfillments = order.get('fulfillments') or []
     is_unfulfilled = len(fulfillments) == 0
 
+    # Skip orders where ALL tracking numbers are placeholder "FORGC"
+    if fulfillments:
+        tracking_numbers = [f.get('tracking_number', '') for f in fulfillments]
+        if tracking_numbers and all(tn and tn.upper() == 'FORGC' for tn in tracking_numbers):
+            logger.info("Order %s in store %s has only FORGC tracking, skipping",
+                         order_number, store['name'])
+            return None
+
     if is_unfulfilled:
         # Order hasn't shipped at all — no ParcelPanel check needed
         tracking_number = 'N/A'

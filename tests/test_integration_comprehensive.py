@@ -559,3 +559,108 @@ class TestConcurrentProcessingLock:
             with patch('src.processor._load_template', return_value='<p>test</p>'):
                 result = processor.process_store(test_store, dry_run=False)
                 assert result.get('already_running') is not True
+
+
+# =============================================================================
+# FORGC TRACKING FILTER TESTS
+# =============================================================================
+
+@patch('src.email_sender.send_email')
+@patch('src.parcel_panel.get_order_tracking')
+@patch('src.shopify_client.get_recent_orders')
+@patch('src.processor._load_template')
+class TestFORGCFiltering:
+    """Orders where ALL tracking numbers are FORGC should be skipped."""
+
+    def test_all_forgc_tracking_skipped(self, mock_template, mock_shopify,
+                                        mock_parcelpanel, mock_sendgrid, test_store):
+        """Order with only FORGC fulfillments should be skipped entirely."""
+        mock_template.return_value = '<p>Order {{ order_number }}</p>'
+        database.create_store(test_store)
+
+        mock_shopify.return_value = [{
+            'id': '200', 'name': '#200',
+            'created_at': '2024-01-01T00:00:00Z',
+            'customer': {'email': 'c@test.com', 'first_name': 'Jane'},
+            'fulfillments': [
+                {'tracking_number': 'FORGC'},
+                {'tracking_number': 'FORGC'},
+            ],
+            'cancelled_at': None,
+        }]
+
+        result = processor.process_store(test_store, dry_run=False)
+        assert result['sent'] == 0
+        # ParcelPanel should never be called — skipped before that
+        mock_parcelpanel.assert_not_called()
+        mock_sendgrid.assert_not_called()
+
+    def test_mixed_forgc_and_real_tracking_not_skipped(self, mock_template, mock_shopify,
+                                                        mock_parcelpanel, mock_sendgrid, test_store):
+        """Order with FORGC + real tracking should still be processed."""
+        mock_template.return_value = '<p>Order {{ order_number }}</p>'
+        database.create_store(test_store)
+
+        mock_shopify.return_value = [{
+            'id': '201', 'name': '#201',
+            'created_at': '2024-01-01T00:00:00Z',
+            'customer': {'email': 'c@test.com', 'first_name': 'Jane'},
+            'fulfillments': [
+                {'tracking_number': 'FORGC'},
+                {'tracking_number': 'YT123456'},
+            ],
+            'cancelled_at': None,
+        }]
+
+        mock_parcelpanel.return_value = {
+            'shipments': [{'status': 'PENDING', 'tracking_number': 'YT123456'}],
+        }
+        mock_sendgrid.return_value = True
+
+        result = processor.process_store(test_store, dry_run=False)
+        # ParcelPanel should be called since not all tracking is FORGC
+        mock_parcelpanel.assert_called_once()
+
+    def test_single_forgc_fulfillment_skipped(self, mock_template, mock_shopify,
+                                               mock_parcelpanel, mock_sendgrid, test_store):
+        """Order with a single FORGC fulfillment should be skipped."""
+        mock_template.return_value = '<p>Order {{ order_number }}</p>'
+        database.create_store(test_store)
+
+        mock_shopify.return_value = [{
+            'id': '202', 'name': '#202',
+            'created_at': '2024-01-01T00:00:00Z',
+            'customer': {'email': 'c@test.com', 'first_name': 'Jane'},
+            'fulfillments': [{'tracking_number': 'forgc'}],  # lowercase
+            'cancelled_at': None,
+        }]
+
+        result = processor.process_store(test_store, dry_run=False)
+        assert result['sent'] == 0
+        mock_parcelpanel.assert_not_called()
+
+    def test_forgc_plus_empty_tracking_not_skipped(self, mock_template, mock_shopify,
+                                                    mock_parcelpanel, mock_sendgrid, test_store):
+        """FORGC + empty tracking number means item has no tracking yet — don't skip."""
+        mock_template.return_value = '<p>Order {{ order_number }}</p>'
+        database.create_store(test_store)
+
+        mock_shopify.return_value = [{
+            'id': '203', 'name': '#203',
+            'created_at': '2024-01-01T00:00:00Z',
+            'customer': {'email': 'c@test.com', 'first_name': 'Jane'},
+            'fulfillments': [
+                {'tracking_number': 'FORGC'},
+                {'tracking_number': ''},
+            ],
+            'cancelled_at': None,
+        }]
+
+        mock_parcelpanel.return_value = {
+            'shipments': [{'status': 'PENDING', 'tracking_number': 'FORGC'}],
+        }
+        mock_sendgrid.return_value = True
+
+        result = processor.process_store(test_store, dry_run=False)
+        # Should NOT be skipped — empty tracking means an item still needs tracking
+        mock_parcelpanel.assert_called_once()
