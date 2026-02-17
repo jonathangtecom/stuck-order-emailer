@@ -337,3 +337,23 @@ class TestForeignKeyConstraint:
         assert database.get_store(store_id) is None
         emails, total = database.get_sent_emails(store_id=store_id)
         assert total == 0
+
+
+class TestDefensiveNoneHandling:
+    def test_create_store_none_send_hour_uses_default(self):
+        """send_hour=None should fall back to default 9, not crash."""
+        store_id = database.create_store(_make_store(send_hour=None))
+        store = database.get_store(store_id)
+        assert store['send_hour'] == 9
+
+    def test_create_store_none_send_minute_uses_default(self):
+        """send_minute=None should fall back to default 0, not crash."""
+        store_id = database.create_store(_make_store(send_minute=None))
+        store = database.get_store(store_id)
+        assert store['send_minute'] == 0
+
+    def test_create_store_none_days_threshold_uses_default(self):
+        """days_threshold=None should fall back to default 8, not crash."""
+        store_id = database.create_store(_make_store(days_threshold=None))
+        store = database.get_store(store_id)
+        assert store['days_threshold'] == 8

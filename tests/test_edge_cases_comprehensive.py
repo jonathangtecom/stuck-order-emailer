@@ -31,6 +31,8 @@ with open(os.path.join(_tmpdir, 'templates', 'example.html'), 'w') as f:
 from app import app
 from src import database, processor
 
+CSRF_TOKEN = 'test-csrf-token'
+
 
 @pytest.fixture
 def client():
@@ -45,7 +47,9 @@ def client():
 
 @pytest.fixture
 def auth_client(client):
-    client.post('/login', data={'password': 'testpass'})
+    with client.session_transaction() as sess:
+        sess['csrf_token'] = CSRF_TOKEN
+    client.post('/login', data={'password': 'testpass', 'csrf_token': CSRF_TOKEN})
     return client
 
 
@@ -182,6 +186,7 @@ class TestUnicodeHandling:
             'from_name': 'Test 👥',
             'email_subject': 'Order 📧',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         }, follow_redirects=True)
 
         assert resp.status_code == 200

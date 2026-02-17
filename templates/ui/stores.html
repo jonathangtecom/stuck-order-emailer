@@ -51,10 +51,15 @@
 
 {% block scripts %}
 <script>
+const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
 async function toggleStore(checkbox) {
   const storeId = checkbox.dataset.storeId;
   try {
-    const resp = await fetch(`/stores/${encodeURIComponent(storeId)}/toggle`, {method: 'POST'});
+    const resp = await fetch(`/stores/${encodeURIComponent(storeId)}/toggle`, {
+      method: 'POST',
+      headers: {'X-CSRF-Token': csrfToken},
+    });
     const data = await resp.json();
     checkbox.checked = data.enabled;
   } catch (e) {
@@ -71,6 +76,11 @@ function deleteStore(el) {
   const form = document.createElement('form');
   form.method = 'POST';
   form.action = `/stores/${encodeURIComponent(storeId)}/delete`;
+  const csrf = document.createElement('input');
+  csrf.type = 'hidden';
+  csrf.name = 'csrf_token';
+  csrf.value = csrfToken;
+  form.appendChild(csrf);
   document.body.appendChild(form);
   form.submit();
 }

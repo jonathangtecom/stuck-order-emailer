@@ -36,6 +36,8 @@ from src import database
 from src import shopify_client
 from src import api_request_with_retry
 
+CSRF_TOKEN = 'test-csrf-token'
+
 
 @pytest.fixture
 def client():
@@ -51,7 +53,9 @@ def client():
 @pytest.fixture
 def auth_client(client):
     """Client with active session."""
-    client.post('/login', data={'password': 'testpass'})
+    with client.session_transaction() as sess:
+        sess['csrf_token'] = CSRF_TOKEN
+    client.post('/login', data={'password': 'testpass', 'csrf_token': CSRF_TOKEN})
     return client
 
 
@@ -108,8 +112,10 @@ class TestBug1BearerTokenTimingAttack:
             importlib.reload(app_module)
 
             # Attempt auth with bearer token when RUN_TOKEN is empty
+            with client.session_transaction() as sess:
+                sess['csrf_token'] = CSRF_TOKEN
             resp = client.post('/api/run',
-                              headers={'Authorization': 'Bearer anything'},
+                              headers={'Authorization': 'Bearer anything', 'X-CSRF-Token': CSRF_TOKEN},
                               environ_base={'REMOTE_ADDR': '8.8.8.8'})  # Non-localhost
 
             # Should reject because RUN_TOKEN is empty (bearer auth disabled)
@@ -284,6 +290,7 @@ class TestBug4WeakEmailValidation:
         """CRITICAL: Email with no local part (@.com) should be rejected"""
 
         resp = auth_client.post('/stores', data={
+            'csrf_token': CSRF_TOKEN,
             'name': 'Test Missing Local',
             'from_email': '@.com',  # INVALID: no local part
             'parcel_panel_api_key': 'k',
@@ -301,6 +308,7 @@ class TestBug4WeakEmailValidation:
         """CRITICAL: Email with no domain (user@) should be rejected"""
 
         resp = auth_client.post('/stores', data={
+            'csrf_token': CSRF_TOKEN,
             'name': 'Test Missing Domain',
             'from_email': 'user@',  # INVALID: no domain
             'parcel_panel_api_key': 'k',
@@ -318,6 +326,7 @@ class TestBug4WeakEmailValidation:
         """CRITICAL: Email with double @ (user@@domain.com) should be rejected"""
 
         resp = auth_client.post('/stores', data={
+            'csrf_token': CSRF_TOKEN,
             'name': 'Test Double At',
             'from_email': 'user@@domain.com',  # INVALID: double @
             'parcel_panel_api_key': 'k',
@@ -335,6 +344,7 @@ class TestBug4WeakEmailValidation:
         """HIGH: Email with domain starting with dot (user@.com) should be rejected"""
 
         resp = auth_client.post('/stores', data={
+            'csrf_token': CSRF_TOKEN,
             'name': 'Test Dot Domain',
             'from_email': 'user@.com',  # INVALID: domain starts with dot
             'parcel_panel_api_key': 'k',
@@ -356,6 +366,7 @@ class TestBug4WeakEmailValidation:
         email = f"{long_local}@verylongdomainname.com"  # 232 + 1(@) + 23 = 256 chars
 
         resp = auth_client.post('/stores', data={
+            'csrf_token': CSRF_TOKEN,
             'name': 'Test Long Email',
             'from_email': email,
             'parcel_panel_api_key': 'k',

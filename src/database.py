@@ -142,9 +142,9 @@ def create_store(data):
             data['from_name'].strip(),
             data['email_subject'].strip(),
             data['email_template'].strip(),
-            int(data.get('days_threshold', 8)),
-            int(data.get('send_hour', 9)),
-            int(data.get('send_minute', 0)),
+            int(data['days_threshold']) if data.get('days_threshold') is not None else 8,
+            int(data['send_hour']) if data.get('send_hour') is not None else 9,
+            int(data['send_minute']) if data.get('send_minute') is not None else 0,
         ))
     return store_id
 

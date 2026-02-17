@@ -6,6 +6,7 @@
 <h2>{{ 'Edit' if store else 'Add New' }} Store</h2>
 
 <form method="post" action="{{ '/stores/' + store.id if store else '/stores' }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="grid">
     <label>
       Store Name *

@@ -71,6 +71,8 @@
 
 {% block scripts %}
 <script>
+const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
 async function runProcess() {
   const btn = document.getElementById('btn-run');
   const origText = btn.textContent;
@@ -82,7 +84,7 @@ async function runProcess() {
   btn.textContent = 'Sending emails...';
 
   try {
-    const resp = await fetch('/api/run', {method: 'POST'});
+    const resp = await fetch('/api/run', {method: 'POST', headers: {'X-CSRF-Token': csrfToken}});
     const data = await resp.json();
 
     if (!resp.ok) {

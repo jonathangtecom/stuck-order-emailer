@@ -21,6 +21,8 @@ import pytest
 import hmac
 from unittest.mock import patch
 
+CSRF_TOKEN = 'test-csrf-token'
+
 # Setup test environment
 _tmpdir = tempfile.mkdtemp()
 os.environ['DATABASE_PATH'] = os.path.join(_tmpdir, 'test_security.db')
@@ -52,7 +54,9 @@ def client():
 @pytest.fixture
 def auth_client(client):
     """Client with active session."""
-    client.post('/login', data={'password': 'testpass'})
+    with client.session_transaction() as sess:
+        sess['csrf_token'] = CSRF_TOKEN
+    client.post('/login', data={'password': 'testpass', 'csrf_token': CSRF_TOKEN})
     return client
 
 
@@ -77,7 +81,9 @@ class TestAuthenticationSecurity:
 
             # With empty ADMIN_PASSWORD, hmac.compare_digest('', '') returns True
             # So empty password login would succeed (redirect to dashboard)
-            resp = client.post('/login', data={'password': ''})
+            with client.session_transaction() as sess:
+                sess['csrf_token'] = CSRF_TOKEN
+            resp = client.post('/login', data={'password': '', 'csrf_token': CSRF_TOKEN})
 
             # Expected: 302 redirect (successful login) or 200 with error
             # Current behavior: hmac.compare_digest('', '') == True, so it succeeds
@@ -114,7 +120,10 @@ class TestAuthenticationSecurity:
     def test_api_run_without_auth_from_external_ip(self, client):
         """HIGH: /api/run endpoint should reject unauthenticated external requests"""
         # Simulate non-localhost IP
+        with client.session_transaction() as sess:
+            sess['csrf_token'] = CSRF_TOKEN
         resp = client.post('/api/run',
+                          headers={'X-CSRF-Token': CSRF_TOKEN},
                           environ_base={'REMOTE_ADDR': '8.8.8.8'})
         assert resp.status_code == 403, \
             "/api/run from external IP without auth should return 403"
@@ -126,7 +135,9 @@ class TestAuthenticationSecurity:
         cookie1 = resp1.headers.get('Set-Cookie', '')
 
         # Login
-        resp2 = client.post('/login', data={'password': 'testpass'})
+        with client.session_transaction() as sess:
+            sess['csrf_token'] = CSRF_TOKEN
+        resp2 = client.post('/login', data={'password': 'testpass', 'csrf_token': CSRF_TOKEN})
         cookie2 = resp2.headers.get('Set-Cookie', '')
 
         # Session should change after successful login (Flask does this by default)
@@ -154,6 +165,7 @@ class TestXSSPrevention:
             'from_name': 'T',
             'email_subject': 'S',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         }, follow_redirects=True)
 
         # Check stores page
@@ -180,7 +192,8 @@ class TestXSSPrevention:
 
         for template in malicious_templates:
             resp = auth_client.post('/api/templates/preview',
-                                   json={'content': template})
+                                   json={'content': template},
+                                   headers={'X-CSRF-Token': CSRF_TOKEN})
 
             if resp.status_code == 200:
                 html = resp.data.decode()
@@ -221,6 +234,7 @@ class TestSQLInjection:
             'from_name': 'T',
             'email_subject': 'S',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         }, follow_redirects=True)
 
         # Try to inject via update (fields should be whitelisted)
@@ -240,6 +254,7 @@ class TestSQLInjection:
             'from_name': 'T',
             'email_subject': 'S',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         }, follow_redirects=True)
 
         # Store should still exist and be intact
@@ -278,6 +293,7 @@ class TestSQLInjection:
             'from_name': 'T',
             'email_subject': 'S',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         }, follow_redirects=True)
 
         # Verify database is intact
@@ -304,6 +320,7 @@ class TestSensitiveDataProtection:
             'from_name': 'Test',
             'email_subject': 'Subject',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         }, follow_redirects=True)
 
         # Check various pages don't expose tokens
@@ -354,7 +371,9 @@ class TestSensitiveDataProtection:
 
     def test_session_cookie_security_flags(self, client):
         """MEDIUM: Session cookies should have HttpOnly, SameSite flags"""
-        resp = client.post('/login', data={'password': 'testpass'})
+        with client.session_transaction() as sess:
+            sess['csrf_token'] = CSRF_TOKEN
+        resp = client.post('/login', data={'password': 'testpass', 'csrf_token': CSRF_TOKEN})
 
         cookie_header = resp.headers.get('Set-Cookie', '')
 
@@ -449,7 +468,8 @@ class TestSecurityEdgeCases:
         malicious_filename = 'valid.html\x00../../etc/passwd'
 
         resp = auth_client.post(f'/api/templates/{malicious_filename}',
-                               json={'content': 'test'})
+                               json={'content': 'test'},
+                               headers={'X-CSRF-Token': CSRF_TOKEN})
 
         # Should reject (400 Bad Request or 404 Not Found)
         assert resp.status_code in (400, 404), \
@@ -461,11 +481,12 @@ class TestSecurityEdgeCases:
         # These look the same but have different byte representations
 
         # Create template with NFC form
-        resp1 = auth_client.post('/api/templates/café.html',
-                                 json={'content': '<p>NFC form</p>'})
+        resp1 = auth_client.post('/api/templates/caf\u00e9.html',
+                                 json={'content': '<p>NFC form</p>'},
+                                 headers={'X-CSRF-Token': CSRF_TOKEN})
 
         # Try to access with NFD form
-        resp2 = auth_client.get('/api/templates/café.html')
+        resp2 = auth_client.get('/api/templates/cafe\u0301.html')
 
         # Should handle gracefully (may return 200, 404, or 400 depending on validation)
         assert resp2.status_code in (200, 400, 404), \

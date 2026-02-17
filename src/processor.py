@@ -1,6 +1,7 @@
 import os
 import time
 import logging
+import threading
 from datetime import datetime, timezone
 
 from jinja2.sandbox import SandboxedEnvironment
@@ -11,6 +12,19 @@ from src import parcel_panel
 from src import email_sender
 
 logger = logging.getLogger(__name__)
+
+# Per-store locks to prevent concurrent processing of the same store
+# (e.g. "Run Now" overlapping with a scheduled job).
+_store_locks = {}
+_store_locks_mutex = threading.Lock()
+
+
+def _get_store_lock(store_id):
+    """Get or create a threading lock for a specific store."""
+    with _store_locks_mutex:
+        if store_id not in _store_locks:
+            _store_locks[store_id] = threading.Lock()
+        return _store_locks[store_id]
 
 try:
     import sentry_sdk
@@ -114,7 +128,29 @@ def _process_store_with_retry(store, dry_run=False):
 
 
 def process_store(store, dry_run=False):
-    """Process a single store. Returns dict with sent/skipped counts."""
+    """Process a single store. Returns dict with sent/skipped counts.
+
+    Uses a per-store lock to prevent concurrent processing (e.g. "Run Now"
+    overlapping with a scheduled job). If the store is already being processed,
+    returns immediately with already_running=True.
+    """
+    store_id = store['id']
+    store_name = store['name']
+    days_threshold = store.get('days_threshold', 8)
+
+    lock = _get_store_lock(store_id)
+    if not lock.acquire(blocking=False):
+        logger.warning("Store %s is already being processed, skipping", store_name)
+        return {'sent': 0, 'skipped': 0, 'already_running': True}
+
+    try:
+        return _process_store_unlocked(store, dry_run=dry_run)
+    finally:
+        lock.release()
+
+
+def _process_store_unlocked(store, dry_run=False):
+    """Internal: process a store (caller must hold the store lock)."""
     store_id = store['id']
     store_name = store['name']
     days_threshold = store.get('days_threshold', 8)

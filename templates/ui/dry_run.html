@@ -68,6 +68,7 @@
 
 {% block scripts %}
 <script>
+const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 const emailBodies = {};
 
 async function runDryRun() {
@@ -86,7 +87,7 @@ async function runDryRun() {
   results.style.display = 'none';
 
   try {
-    const resp = await fetch('/api/run?dry_run=1', {method: 'POST'});
+    const resp = await fetch('/api/run?dry_run=1', {method: 'POST', headers: {'X-CSRF-Token': csrfToken}});
     const data = await resp.json();
 
     if (!resp.ok) {

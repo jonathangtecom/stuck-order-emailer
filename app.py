@@ -3,6 +3,7 @@ import re
 import csv
 import hmac
 import math
+import secrets
 import logging
 import functools
 from io import StringIO
@@ -272,6 +273,46 @@ def add_sentry_context():
     sentry_sdk.set_tag('method', request.method)
 
 
+# ── CSRF Protection ──────────────────────────────────────────
+
+def _generate_csrf_token():
+    """Generate a CSRF token for the current session."""
+    if 'csrf_token' not in session:
+        session['csrf_token'] = secrets.token_hex(32)
+    return session['csrf_token']
+
+
+app.jinja_env.globals['csrf_token'] = _generate_csrf_token
+
+
+@app.before_request
+def csrf_protect():
+    """Validate CSRF token on state-changing requests."""
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return
+
+    # /api/run: skip CSRF for non-browser auth (localhost or Bearer token)
+    if request.endpoint == 'api_run':
+        remote = request.remote_addr
+        bearer = request.headers.get('Authorization', '').replace('Bearer ', '')
+        is_local = remote in ALLOWED_RUN_IPS
+        is_token = RUN_TOKEN and hmac.compare_digest(bearer, RUN_TOKEN or '')
+        if is_local or is_token:
+            return
+
+    token = (
+        request.form.get('csrf_token')
+        or request.headers.get('X-CSRF-Token')
+    )
+
+    expected = session.get('csrf_token')
+    if not token or not expected or not hmac.compare_digest(token, expected):
+        if request.is_json:
+            return jsonify({'error': 'CSRF token missing or invalid'}), 403
+        flash('Session expired. Please try again.', 'error')
+        return redirect(request.referrer or url_for('login'))
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -361,6 +402,15 @@ def store_create():
                                store=data,
                                templates=templates)
 
+    template_error = _validate_templates(data['email_subject'], data['email_template'])
+    if template_error:
+        flash(template_error, 'error')
+        templates = _list_template_files()
+        return render_template('ui/store_form.html',
+                               active_page='stores',
+                               store=data,
+                               templates=templates)
+
     try:
         store_id = database.create_store(data)
         _register_store_job(database.get_store(store_id))
@@ -410,6 +460,18 @@ def store_update(store_id):
 
     if data.get('from_email') and not _is_valid_email(data['from_email']):
         flash('Invalid from_email format.', 'error')
+        templates = _list_template_files()
+        return render_template('ui/store_form.html',
+                               active_page='stores',
+                               store={**store, **data},
+                               templates=templates)
+
+    template_error = _validate_templates(
+        data.get('email_subject') or store['email_subject'],
+        data.get('email_template') or store['email_template'],
+    )
+    if template_error:
+        flash(template_error, 'error')
         templates = _list_template_files()
         return render_template('ui/store_form.html',
                                active_page='stores',
@@ -511,6 +573,14 @@ def api_template_save(filename):
         return jsonify({'error': 'JSON body required'}), 400
 
     content = data.get('content', '')
+
+    # Validate Jinja2 syntax before saving (prevents silently breaking stores)
+    try:
+        env = SandboxedEnvironment()
+        env.from_string(content).render(**_TEMPLATE_DUMMY_VARS)
+    except Exception as e:
+        return jsonify({'error': f'Template syntax error: {e}'}), 400
+
     try:
         # Write the file
         with open(filepath, 'w', encoding='utf-8') as f:
@@ -848,6 +918,43 @@ def _is_valid_email(email):
         return False
 
     return True
+
+
+_TEMPLATE_DUMMY_VARS = {
+    'customer_name': 'Test Customer', 'first_name': 'Test',
+    'order_number': '#0000', 'tracking_number': 'N/A', 'tracking_url': '',
+    'store_name': 'Test Store', 'order_date': 'January 01, 2025',
+    'days_waiting': '8',
+}
+
+
+def _validate_templates(subject, template_filename):
+    """Validate email subject and template for Jinja2 syntax errors.
+
+    Returns None on success, or an error message string on failure.
+    """
+    env = SandboxedEnvironment()
+    try:
+        env.from_string(subject).render(**_TEMPLATE_DUMMY_VARS)
+    except Exception as e:
+        return f'Email subject template error: {e}'
+
+    # Load template from app's TEMPLATES_PATH (not processor's which tests may mutate)
+    path = _safe_template_path(template_filename)
+    if not path:
+        return f'Template file "{template_filename}" not found.'
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            template_html = f.read()
+    except FileNotFoundError:
+        return f'Template file "{template_filename}" not found.'
+
+    try:
+        env.from_string(template_html).render(**_TEMPLATE_DUMMY_VARS)
+    except Exception as e:
+        return f'Email template error: {e}'
+
+    return None
 
 
 def _csv_safe(value):

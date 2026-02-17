@@ -17,6 +17,8 @@ os.makedirs(os.environ['TEMPLATES_PATH'], exist_ok=True)
 from app import app
 from src import database
 
+CSRF_TOKEN = 'test-csrf-token'
+
 
 @pytest.fixture
 def client():
@@ -32,7 +34,9 @@ def client():
 @pytest.fixture
 def logged_in_client(client):
     """Return a logged-in test client."""
-    client.post('/login', data={'password': 'testpass'})
+    with client.session_transaction() as sess:
+        sess['csrf_token'] = CSRF_TOKEN
+    client.post('/login', data={'password': 'testpass', 'csrf_token': CSRF_TOKEN})
     return client
 
 
@@ -55,6 +59,7 @@ class TestSendTestEmail:
                     'from_name': 'Test Store',
                     'subject': 'Order {{ order_number }}',
                 },
+                headers={'X-CSRF-Token': CSRF_TOKEN},
             )
 
             assert response.status_code == 200
@@ -80,6 +85,7 @@ class TestSendTestEmail:
                 'to_email': 'test@example.com',
                 # Missing from_email, from_name, subject
             },
+            headers={'X-CSRF-Token': CSRF_TOKEN},
         )
 
         assert response.status_code == 400
@@ -99,6 +105,7 @@ class TestSendTestEmail:
                 'from_name': 'Store',
                 'subject': 'Test',
             },
+            headers={'X-CSRF-Token': CSRF_TOKEN},
         )
 
         assert response.status_code == 400
@@ -118,6 +125,7 @@ class TestSendTestEmail:
                 'from_name': 'Store',
                 'subject': 'Test',
             },
+            headers={'X-CSRF-Token': CSRF_TOKEN},
         )
 
         assert response.status_code == 400
@@ -137,6 +145,7 @@ class TestSendTestEmail:
                 'from_name': 'Store',
                 'subject': 'Test',
             },
+            headers={'X-CSRF-Token': CSRF_TOKEN},
         )
 
         assert response.status_code == 500
@@ -158,6 +167,7 @@ class TestSendTestEmail:
                     'from_name': 'Store',
                     'subject': 'Test',
                 },
+                headers={'X-CSRF-Token': CSRF_TOKEN},
             )
 
             assert response.status_code == 500
@@ -194,6 +204,7 @@ class TestSendTestEmail:
                     'from_name': 'Store',
                     'subject': 'Your order {{ order_number }} - {{ days_waiting }} days',
                 },
+                headers={'X-CSRF-Token': CSRF_TOKEN},
             )
 
             assert response.status_code == 200

@@ -19,6 +19,8 @@ with open(os.path.join(os.environ['TEMPLATES_PATH'], 'example.html'), 'w') as f:
 from app import app
 from src import database
 
+CSRF_TOKEN = 'test-csrf-token'
+
 
 @pytest.fixture
 def client():
@@ -33,7 +35,9 @@ def client():
 
 @pytest.fixture
 def auth_client(client):
-    client.post('/login', data={'password': 'testpass'})
+    with client.session_transaction() as sess:
+        sess['csrf_token'] = CSRF_TOKEN
+    client.post('/login', data={'password': 'testpass', 'csrf_token': CSRF_TOKEN})
     return client
 
 
@@ -153,7 +157,9 @@ class TestConcurrency:
         def make_request():
             try:
                 with app.test_client() as c:
-                    c.post('/login', data={'password': 'testpass'})
+                    with c.session_transaction() as sess:
+                        sess['csrf_token'] = CSRF_TOKEN
+                    c.post('/login', data={'password': 'testpass', 'csrf_token': CSRF_TOKEN})
                     for _ in range(10):
                         resp = c.get('/stores')
                         if resp.status_code != 200:

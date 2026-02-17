@@ -485,3 +485,77 @@ class TestEndToEndPipeline:
         # The processor continues after errors
         assert result['sent'] >= 1  # At least 1 email sent
         # Error is logged, processing continues
+
+
+class TestConcurrentProcessingLock:
+    """Tests for per-store threading lock that prevents duplicate emails."""
+
+    @patch('src.processor._load_template')
+    @patch('src.email_sender.send_email')
+    @patch('src.parcel_panel.get_order_tracking')
+    @patch('src.shopify_client.get_recent_orders')
+    def test_concurrent_call_returns_already_running(
+        self, mock_shopify, mock_parcelpanel, mock_sendgrid, mock_template, test_store
+    ):
+        """If a store is already being processed, second call should skip."""
+        import threading
+
+        mock_template.return_value = '<p>Order {{ order_number }}</p>'
+        database.create_store(test_store)
+
+        barrier = threading.Barrier(2, timeout=5)
+        results = [None, None]
+
+        # Make Shopify slow so the first call holds the lock
+        def slow_shopify(*args, **kwargs):
+            barrier.wait()  # Wait for both threads to start
+            time.sleep(0.5)  # Hold the lock long enough
+            return [{
+                'id': '100', 'name': '#100',
+                'created_at': '2024-01-01T00:00:00Z',
+                'customer': {'email': 'c@t.com', 'first_name': 'A'},
+                'fulfillments': [], 'cancelled_at': None,
+            }]
+
+        mock_shopify.side_effect = slow_shopify
+        mock_sendgrid.return_value = True
+
+        def run_first():
+            results[0] = processor.process_store(test_store, dry_run=False)
+
+        def run_second():
+            barrier.wait()  # Wait for first thread to enter
+            time.sleep(0.1)  # Let first thread acquire the lock
+            results[1] = processor.process_store(test_store, dry_run=False)
+
+        t1 = threading.Thread(target=run_first)
+        t2 = threading.Thread(target=run_second)
+        t1.start()
+        t2.start()
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+
+        # One should succeed, the other should be skipped
+        assert results[0] is not None
+        assert results[1] is not None
+        already_running_count = sum(
+            1 for r in results if r.get('already_running')
+        )
+        assert already_running_count == 1
+
+    def test_lock_released_after_exception(self, test_store):
+        """Lock must be released even if processing throws."""
+        database.create_store(test_store)
+
+        with patch('src.shopify_client.get_recent_orders', side_effect=Exception("boom")):
+            with patch('src.processor._load_template', return_value='<p>test</p>'):
+                try:
+                    processor.process_store(test_store, dry_run=False)
+                except Exception:
+                    pass
+
+        # Lock should be released — second call should NOT return already_running
+        with patch('src.shopify_client.get_recent_orders', return_value=[]):
+            with patch('src.processor._load_template', return_value='<p>test</p>'):
+                result = processor.process_store(test_store, dry_run=False)
+                assert result.get('already_running') is not True

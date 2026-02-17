@@ -90,6 +90,8 @@
     keymap.of([...defaultKeymap, ...historyKeymap])
   ];
 
+  const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
   let editor = null;
   let currentFile = null;
 
@@ -174,7 +176,7 @@
     try {
       const resp = await fetch(`/api/templates/${encodeURIComponent(currentFile)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
         body: JSON.stringify({ content: getEditorContent() }),
       });
       if (!resp.ok) throw new Error('Save failed');
@@ -188,7 +190,7 @@
     try {
       const resp = await fetch('/api/templates/preview', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
         body: JSON.stringify({ content: getEditorContent() }),
       });
       if (!resp.ok) {
@@ -212,7 +214,7 @@
     try {
       const resp = await fetch(`/api/templates/${encodeURIComponent(safeName)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
         body: JSON.stringify({ content: '' }),
       });
       if (!resp.ok) throw new Error('Create failed');
@@ -233,7 +235,7 @@
     try {
       const resp = await fetch(`/api/templates/${encodeURIComponent(safeName)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
         body: JSON.stringify({ content: getEditorContent() }),
       });
       if (!resp.ok) throw new Error('Duplicate failed');
@@ -252,6 +254,7 @@
     try {
       const resp = await fetch(`/api/templates/${encodeURIComponent(currentFile)}`, {
         method: 'DELETE',
+        headers: { 'X-CSRF-Token': csrfToken },
       });
       if (!resp.ok) throw new Error('Delete failed');
 
@@ -292,7 +295,7 @@
     try {
       const resp = await fetch('/api/templates/send-test', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
         body: JSON.stringify(payload),
       });
 

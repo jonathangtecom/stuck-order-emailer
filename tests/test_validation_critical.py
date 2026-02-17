@@ -18,6 +18,8 @@ import os
 import tempfile
 import pytest
 
+CSRF_TOKEN = 'test-csrf-token'
+
 # Setup test environment
 _tmpdir = tempfile.mkdtemp()
 os.environ['DATABASE_PATH'] = os.path.join(_tmpdir, 'test_validation.db')
@@ -48,7 +50,9 @@ def client():
 @pytest.fixture
 def auth_client(client):
     """Client with active session."""
-    client.post('/login', data={'password': 'testpass'})
+    with client.session_transaction() as sess:
+        sess['csrf_token'] = CSRF_TOKEN
+    client.post('/login', data={'password': 'testpass', 'csrf_token': CSRF_TOKEN})
     return client
 
 
@@ -171,6 +175,7 @@ class TestDaysThresholdValidation:
             'from_name': 'T',
             'email_subject': 'S',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         }, follow_redirects=True)
 
         assert resp.status_code == 200
@@ -195,6 +200,7 @@ class TestDaysThresholdValidation:
             'from_name': 'T',
             'email_subject': 'S',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         }, follow_redirects=True)
 
         # Currently accepts negative values - document the bug
@@ -217,6 +223,7 @@ class TestDaysThresholdValidation:
             'from_name': 'T',
             'email_subject': 'S',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         }, follow_redirects=True)
 
         assert resp.status_code == 200
@@ -236,6 +243,7 @@ class TestDaysThresholdValidation:
             'from_name': 'T',
             'email_subject': 'S',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         })
 
         # Should either reject with error or use default
@@ -255,6 +263,7 @@ class TestDaysThresholdValidation:
             'from_name': 'T',
             'email_subject': 'S',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         })
 
         # int('8.5') raises ValueError, should be caught
@@ -274,7 +283,8 @@ class TestTemplateFileValidation:
         content = '<p>Test content</p>' * 1000  # ~20KB
 
         resp = auth_client.post('/api/templates/normal.html',
-                                json={'content': content})
+                                json={'content': content},
+                                headers={'X-CSRF-Token': CSRF_TOKEN})
 
         assert resp.status_code == 200
         data = resp.get_json()
@@ -286,7 +296,8 @@ class TestTemplateFileValidation:
         content = '<p>x</p>' * 400000  # ~2MB
 
         resp = auth_client.post('/api/templates/huge.html',
-                                json={'content': content})
+                                json={'content': content},
+                                headers={'X-CSRF-Token': CSRF_TOKEN})
 
         # Should either accept or reject with 413 Payload Too Large
         # Current implementation accepts - test documents behavior
@@ -298,7 +309,8 @@ class TestTemplateFileValidation:
         content = '<p>Test\x00content</p>'
 
         resp = auth_client.post('/api/templates/nullbyte.html',
-                                json={'content': content})
+                                json={'content': content},
+                                headers={'X-CSRF-Token': CSRF_TOKEN})
 
         # Should either accept (sanitized) or reject
         assert resp.status_code in (200, 400), \
@@ -318,6 +330,7 @@ class TestTemplateFileValidation:
             'from_email': 'test@example.com',
             'from_name': 'T',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         }, follow_redirects=True)
 
         # Should either accept or validate length
@@ -347,6 +360,7 @@ class TestStoreURLValidation:
             'from_name': 'T',
             'email_subject': 'S',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         }, follow_redirects=True)
 
         # Currently accepts - test documents behavior
@@ -393,6 +407,7 @@ class TestBoundaryConditions:
             'from_name': 'T',
             'email_subject': 'S',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         })
 
         # Should reject empty name
@@ -411,6 +426,7 @@ class TestBoundaryConditions:
             'from_name': 'T',
             'email_subject': 'S',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         })
 
         # Should either reject or trim
@@ -435,6 +451,7 @@ class TestBoundaryConditions:
             'from_name': 'T',
             'email_subject': 'S',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         }, follow_redirects=True)
 
         # Should either accept or validate length
@@ -452,6 +469,7 @@ class TestBoundaryConditions:
             'from_name': '测试团队 👥',
             'email_subject': 'Subject 📧',
             'email_template': 'example.html',
+            'csrf_token': CSRF_TOKEN,
         }, follow_redirects=True)
 
         assert resp.status_code == 200
@@ -464,6 +482,7 @@ class TestBoundaryConditions:
         resp = auth_client.post('/stores', data={
             'name': 'Test',
             'parcel_panel_api_key': 'k',
+            'csrf_token': CSRF_TOKEN,
         })
 
         html = resp.data.decode()
