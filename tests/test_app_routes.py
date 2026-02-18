@@ -295,6 +295,25 @@ class TestDryRunPage:
         assert resp.status_code == 200
         assert b'Dry Run' in resp.data
 
+    def test_dry_run_page_shows_store_selector(self, auth_client):
+        """Dry run page includes a store selector dropdown with enabled stores."""
+        database.create_store({
+            'name': 'My Store',
+            'parcel_panel_api_key': 'pp-key',
+            'shopify_store_url': 'test.myshopify.com',
+            'shopify_admin_api_token': 'shpat_test',
+            'from_email': 'test@example.com',
+            'from_name': 'Test Team',
+            'email_subject': 'Order update',
+            'email_template': 'example.html',
+            'days_threshold': 8,
+        })
+        resp = auth_client.get('/dry-run')
+        assert resp.status_code == 200
+        assert b'store-select' in resp.data
+        assert b'All Stores' in resp.data
+        assert b'My Store' in resp.data
+
     def test_dry_run_requires_auth(self, client):
         resp = client.get('/dry-run')
         assert resp.status_code == 302

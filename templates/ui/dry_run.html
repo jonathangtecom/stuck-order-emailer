@@ -5,7 +5,15 @@
 {% block content %}
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
   <h2 style="margin-bottom: 0;">Dry Run</h2>
-  <button id="btn-dry-run" onclick="runDryRun()">Run Dry Run</button>
+  <div style="display: flex; gap: 0.5rem; align-items: center;">
+    <select id="store-select" style="margin-bottom: 0;">
+      <option value="">All Stores</option>
+      {% for store in stores %}
+      <option value="{{ store.id }}">{{ store.name }}</option>
+      {% endfor %}
+    </select>
+    <button id="btn-dry-run" onclick="runDryRun()">Run Dry Run</button>
+  </div>
 </div>
 
 <p id="dry-run-description">
@@ -15,7 +23,7 @@
 
 <!-- Loading state -->
 <div id="loading-state" style="display: none; text-align: center; padding: 2rem 0;">
-  <p aria-busy="true">Running dry run across all enabled stores... This may take a minute.</p>
+  <p id="loading-message" aria-busy="true">Running dry run across all enabled stores... This may take a minute.</p>
 </div>
 
 <!-- Error state -->
@@ -78,6 +86,9 @@ async function runDryRun() {
   const errorState = document.getElementById('error-state');
   const results = document.getElementById('results-section');
 
+  const storeSelect = document.getElementById('store-select');
+  const storeId = storeSelect.value;
+
   btn.disabled = true;
   btn.setAttribute('aria-busy', 'true');
   btn.textContent = 'Running...';
@@ -86,8 +97,13 @@ async function runDryRun() {
   errorState.style.display = 'none';
   results.style.display = 'none';
 
+  const storeName = storeId ? storeSelect.selectedOptions[0].text : 'all enabled stores';
+  document.getElementById('loading-message').textContent = 'Running dry run for ' + storeName + '... This may take a minute.';
+
   try {
-    const resp = await fetch('/api/run?dry_run=1', {method: 'POST', headers: {'X-CSRF-Token': csrfToken}});
+    let url = '/api/run?dry_run=1';
+    if (storeId) url += '&store_id=' + encodeURIComponent(storeId);
+    const resp = await fetch(url, {method: 'POST', headers: {'X-CSRF-Token': csrfToken}});
     const data = await resp.json();
 
     if (!resp.ok) {

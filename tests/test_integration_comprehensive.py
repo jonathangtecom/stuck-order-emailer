@@ -664,3 +664,67 @@ class TestFORGCFiltering:
         result = processor.process_store(test_store, dry_run=False)
         # Should NOT be skipped — empty tracking means an item still needs tracking
         mock_parcelpanel.assert_called_once()
+
+
+# =============================================================================
+# PER-STORE DRY RUN TESTS
+# =============================================================================
+
+@patch('src.processor._load_template')
+@patch('src.shopify_client.get_recent_orders')
+@patch('src.parcel_panel.get_order_tracking')
+@patch('src.email_sender.send_email')
+class TestPerStoreDryRun:
+    """Tests for process_all_stores with store_id filtering."""
+
+    def test_dry_run_single_store(self, mock_sendgrid, mock_parcelpanel,
+                                  mock_shopify, mock_template, test_store):
+        """Dry run with store_id only processes that store."""
+        mock_template.return_value = '<p>Order {{ order_number }}</p>'
+        database.create_store(test_store)
+
+        # Create a second store
+        store2 = dict(test_store, id='store-2', name='Store Two')
+        database.create_store(store2)
+
+        mock_shopify.return_value = [{
+            'id': '301', 'name': '#301',
+            'created_at': '2024-01-01T00:00:00Z',
+            'customer': {'email': 'a@test.com', 'first_name': 'Alice'},
+            'fulfillments': [{'tracking_number': 'TRACK123'}],
+            'cancelled_at': None,
+        }]
+        mock_parcelpanel.return_value = {
+            'shipments': [{'status': 'PENDING', 'tracking_number': 'TRACK123'}],
+        }
+        mock_sendgrid.return_value = True
+
+        summary = processor.process_all_stores(dry_run=True, store_id='test-store')
+
+        assert summary['processed'] == 1
+        assert summary['dry_run'] is True
+        assert len(summary['details']) == 1
+        assert summary['details'][0]['store'] == 'Test Store'
+
+    def test_dry_run_nonexistent_store(self, mock_sendgrid, mock_parcelpanel,
+                                       mock_shopify, mock_template, test_store):
+        """Dry run with invalid store_id returns error."""
+        summary = processor.process_all_stores(dry_run=True, store_id='no-such-store')
+
+        assert summary['errors'] == 1
+        assert summary['processed'] == 0
+        assert 'not found' in summary['details'][0]['error'].lower()
+        mock_shopify.assert_not_called()
+
+    def test_dry_run_disabled_store(self, mock_sendgrid, mock_parcelpanel,
+                                    mock_shopify, mock_template, test_store):
+        """Dry run with disabled store_id returns error."""
+        disabled_store = dict(test_store, id='disabled-store')
+        database.create_store(disabled_store)
+        database.toggle_store('disabled-store')  # disable it
+
+        summary = processor.process_all_stores(dry_run=True, store_id='disabled-store')
+
+        assert summary['errors'] == 1
+        assert summary['processed'] == 0
+        mock_shopify.assert_not_called()

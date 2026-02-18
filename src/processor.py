@@ -36,14 +36,22 @@ SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
 TEMPLATES_PATH = os.environ.get('TEMPLATES_PATH', 'data/templates')
 
 
-def process_all_stores(dry_run=False):
-    """Process all enabled stores. Returns summary dict.
+def process_all_stores(dry_run=False, store_id=None):
+    """Process all enabled stores (or a single store if store_id given).
 
     If dry_run=True, runs the full pipeline (Shopify fetch, ParcelPanel check,
     template rendering) but skips sending emails and recording to the database.
     Returns detailed info about what would have been sent.
     """
-    stores = database.get_enabled_stores()
+    if store_id:
+        store = database.get_store(store_id)
+        if not store or not store.get('enabled'):
+            return {'processed': 0, 'emails_sent': 0, 'skipped': 0,
+                    'errors': 1, 'dry_run': dry_run,
+                    'details': [{'store': 'Unknown', 'error': 'Store not found or disabled'}]}
+        stores = [store]
+    else:
+        stores = database.get_enabled_stores()
     summary = {
         'processed': 0,
         'emails_sent': 0,

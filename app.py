@@ -351,8 +351,9 @@ def dashboard():
 @app.route('/dry-run')
 @login_required
 def dry_run():
+    stores = database.get_enabled_stores()
     return render_template('ui/dry_run.html',
-                           active_page='dry_run')
+                           active_page='dry_run', stores=stores)
 
 
 # ── Store CRUD ───────────────────────────────────────────────
@@ -828,10 +829,11 @@ def api_run():
         return jsonify({'error': 'Unauthorized'}), 403
 
     dry_run = request.args.get('dry_run', '0') == '1'
+    store_id = request.args.get('store_id', '') or None
     mode = "DRY RUN" if dry_run else "LIVE"
     logger.info("[%s] Processing run triggered from %s", mode, remote)
     try:
-        summary = processor.process_all_stores(dry_run=dry_run)
+        summary = processor.process_all_stores(dry_run=dry_run, store_id=store_id)
         return jsonify(summary)
     except Exception as e:
         logger.error("Processing run failed: %s", e, exc_info=True)
