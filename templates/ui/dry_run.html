@@ -5,8 +5,9 @@
 {% block content %}
 <!-- Active scheduled runs banner -->
 <div id="active-runs-section" style="display: none; margin-bottom: 1rem;">
-  <div class="flash-info" role="status">
+  <div class="flash-info" role="status" style="display: flex; justify-content: space-between; align-items: center;">
     <span id="active-run-info"></span>
+    <button id="btn-stop-scheduled" class="secondary outline" style="margin: 0; padding: 0.25rem 0.75rem; font-size: 0.85rem;" onclick="cancelScheduledRuns()">Stop</button>
   </div>
 </div>
 
@@ -397,6 +398,20 @@ function closePreviewModal() {
 
 // ── Active scheduled runs polling ────────────────────────────
 
+let activeScheduledRunIds = [];
+
+async function cancelScheduledRuns() {
+  const btn = document.getElementById('btn-stop-scheduled');
+  btn.disabled = true;
+  btn.textContent = 'Stopping...';
+  for (let i = 0; i < activeScheduledRunIds.length; i++) {
+    try {
+      await fetch('/api/runs/' + activeScheduledRunIds[i] + '/cancel',
+        {method: 'POST', headers: {'X-CSRF-Token': csrfToken}});
+    } catch (e) { /* ignore */ }
+  }
+}
+
 async function checkActiveRuns() {
   try {
     const resp = await fetch('/api/runs/active');
@@ -406,6 +421,7 @@ async function checkActiveRuns() {
     const section = document.getElementById('active-runs-section');
 
     if (scheduled.length > 0) {
+      activeScheduledRunIds = scheduled.map(function(r) { return r.run_id; });
       const parts = scheduled.map(function(r) {
         let text = r.current_store + ': ';
         if (r.total_orders > 0) {
@@ -420,8 +436,11 @@ async function checkActiveRuns() {
       });
       document.getElementById('active-run-info').textContent =
         'Scheduled run in progress: ' + parts.join(' | ');
+      document.getElementById('btn-stop-scheduled').disabled = false;
+      document.getElementById('btn-stop-scheduled').textContent = 'Stop';
       section.style.display = 'block';
     } else {
+      activeScheduledRunIds = [];
       section.style.display = 'none';
     }
   } catch (e) {

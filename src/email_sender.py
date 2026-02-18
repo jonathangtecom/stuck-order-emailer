@@ -30,5 +30,6 @@ def send_email(to_email, from_email, from_name, subject, html_content, sendgrid_
             return False
 
     except Exception as e:
-        logger.error("Failed to send email to %s: %s", to_email, e)
+        body = getattr(e, 'body', None)
+        logger.error("Failed to send email to %s: %s (body: %s)", to_email, e, body)
         return False
