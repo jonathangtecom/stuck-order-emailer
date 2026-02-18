@@ -1,11 +1,13 @@
 import os
 import re
 import csv
+import uuid
 import hmac
 import math
 import secrets
 import logging
 import functools
+import threading
 from io import StringIO
 from datetime import datetime, timezone
 
@@ -167,13 +169,23 @@ scheduler = BackgroundScheduler()
 
 def _scheduled_process_single_store(store_id):
     """Wrapper for per-store scheduled job with Sentry error tracking."""
+    run_id = uuid.uuid4().hex[:8]
+    run_state = processor.RunState(run_id, dry_run=False, source='scheduler')
+    processor.register_run(run_state)
     try:
-        return processor.process_single_store_by_id(store_id)
+        result = processor.process_single_store_by_id(store_id, run_state=run_state)
+        run_state.result = result
+        run_state.status = 'completed'
+        return result
     except Exception as e:
+        run_state.status = 'error'
+        run_state.error_message = str(e)
         if SENTRY_DSN:
             sentry_sdk.capture_exception(e)
         logger.error("Scheduled processing failed for store %s: %s", store_id, e, exc_info=True)
         raise
+    finally:
+        run_state.completed_at = datetime.now(timezone.utc)
 
 
 def _store_job_id(store_id):
@@ -832,12 +844,96 @@ def api_run():
     store_id = request.args.get('store_id', '') or None
     mode = "DRY RUN" if dry_run else "LIVE"
     logger.info("[%s] Processing run triggered from %s", mode, remote)
+
+    if dry_run:
+        # Dry runs are async — return immediately with a run_id, poll for progress
+        run_id = uuid.uuid4().hex[:8]
+        run_state = processor.RunState(run_id, dry_run=True)
+        processor.register_run(run_state)
+        thread = threading.Thread(
+            target=_run_processing_thread,
+            args=(store_id, run_state), daemon=True)
+        thread.start()
+        return jsonify({'run_id': run_id, 'status': 'started'})
+
     try:
-        summary = processor.process_all_stores(dry_run=dry_run, store_id=store_id)
+        summary = processor.process_all_stores(dry_run=False, store_id=store_id)
         return jsonify(summary)
     except Exception as e:
         logger.error("Processing run failed: %s", e, exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+
+def _run_processing_thread(store_id, run_state):
+    """Background thread for async dry runs."""
+    try:
+        summary = processor.process_all_stores(
+            dry_run=True, store_id=store_id, run_state=run_state)
+        run_state.result = summary
+        run_state.status = 'cancelled' if run_state.cancel_event.is_set() else 'completed'
+    except Exception as e:
+        run_state.status = 'error'
+        run_state.error_message = str(e)
+        logger.error("Dry run failed: %s", e, exc_info=True)
+    finally:
+        run_state.completed_at = datetime.now(timezone.utc)
+
+
+@app.route('/api/runs/<run_id>', methods=['GET'])
+@login_required
+def api_run_status(run_id):
+    """Get progress/results for a specific run."""
+    run_state = processor.get_run(run_id)
+    if not run_state:
+        return jsonify({'error': 'Run not found'}), 404
+    return jsonify({
+        'run_id': run_state.run_id,
+        'status': run_state.status,
+        'dry_run': run_state.dry_run,
+        'source': run_state.source,
+        'started_at': run_state.started_at.isoformat(),
+        'progress': {
+            'total_stores': run_state.total_stores,
+            'stores_processed': run_state.stores_processed,
+            'current_store': run_state.current_store,
+            'total_orders': run_state.total_orders,
+            'orders_checked': run_state.orders_checked,
+            'emails_found': run_state.emails_found,
+            'skipped': run_state.skipped,
+        },
+        'result': run_state.result if run_state.status in ('completed', 'cancelled') else None,
+        'error': run_state.error_message,
+    })
+
+
+@app.route('/api/runs/<run_id>/cancel', methods=['POST'])
+@login_required
+def api_cancel_run(run_id):
+    """Cancel a running dry run."""
+    run_state = processor.get_run(run_id)
+    if not run_state:
+        return jsonify({'error': 'Run not found'}), 404
+    if run_state.status != 'running':
+        return jsonify({'error': 'Run is not active'}), 400
+    run_state.cancel_event.set()
+    return jsonify({'status': 'cancelling'})
+
+
+@app.route('/api/runs/active', methods=['GET'])
+@login_required
+def api_active_runs():
+    """List all active runs (for showing scheduled run progress)."""
+    runs = processor.get_active_runs()
+    return jsonify([{
+        'run_id': r.run_id,
+        'dry_run': r.dry_run,
+        'source': r.source,
+        'current_store': r.current_store,
+        'orders_checked': r.orders_checked,
+        'total_orders': r.total_orders,
+        'emails_found': r.emails_found,
+        'started_at': r.started_at.isoformat(),
+    } for r in runs])
 
 
 # ── Helpers ──────────────────────────────────────────────────

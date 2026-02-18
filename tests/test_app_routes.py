@@ -660,6 +660,121 @@ class TestCSRFProtection:
         assert '/login' in resp2.headers['Location']
 
 
+class TestAsyncDryRun:
+    """Tests for async dry run with progress tracking and cancellation."""
+
+    def test_dry_run_returns_run_id(self, auth_client):
+        """POST /api/run?dry_run=1 returns a run_id instead of blocking."""
+        from unittest.mock import patch
+        with patch('src.processor.process_all_stores') as mock_proc:
+            mock_proc.return_value = {'processed': 0, 'emails_sent': 0,
+                                      'skipped': 0, 'errors': 0, 'dry_run': True,
+                                      'details': []}
+            resp = auth_client.post('/api/run?dry_run=1',
+                                    headers={'X-CSRF-Token': CSRF_TOKEN})
+            data = resp.get_json()
+            assert resp.status_code == 200
+            assert 'run_id' in data
+            assert data['status'] == 'started'
+
+    def test_run_status_endpoint(self, auth_client):
+        """GET /api/runs/<run_id> returns progress."""
+        from src import processor
+        run_state = processor.RunState('test-status', dry_run=True)
+        run_state.current_store = 'Test Store'
+        run_state.total_orders = 100
+        run_state.orders_checked = 50
+        run_state.emails_found = 5
+        processor.register_run(run_state)
+
+        try:
+            resp = auth_client.get('/api/runs/test-status')
+            data = resp.get_json()
+            assert resp.status_code == 200
+            assert data['run_id'] == 'test-status'
+            assert data['status'] == 'running'
+            assert data['progress']['total_orders'] == 100
+            assert data['progress']['orders_checked'] == 50
+            assert data['progress']['emails_found'] == 5
+            assert data['result'] is None  # Not yet complete
+        finally:
+            with processor._active_runs_lock:
+                processor._active_runs.pop('test-status', None)
+
+    def test_run_status_not_found(self, auth_client):
+        """GET /api/runs/<bad_id> returns 404."""
+        resp = auth_client.get('/api/runs/nonexistent')
+        assert resp.status_code == 404
+
+    def test_cancel_run(self, auth_client):
+        """POST /api/runs/<run_id>/cancel sets cancellation flag."""
+        from src import processor
+        run_state = processor.RunState('test-cancel', dry_run=True)
+        processor.register_run(run_state)
+
+        try:
+            resp = auth_client.post('/api/runs/test-cancel/cancel',
+                                    headers={'X-CSRF-Token': CSRF_TOKEN})
+            data = resp.get_json()
+            assert resp.status_code == 200
+            assert data['status'] == 'cancelling'
+            assert run_state.cancel_event.is_set()
+        finally:
+            with processor._active_runs_lock:
+                processor._active_runs.pop('test-cancel', None)
+
+    def test_cancel_completed_run_fails(self, auth_client):
+        """Cannot cancel a run that's already completed."""
+        from src import processor
+        run_state = processor.RunState('test-done', dry_run=True)
+        run_state.status = 'completed'
+        processor.register_run(run_state)
+
+        try:
+            resp = auth_client.post('/api/runs/test-done/cancel',
+                                    headers={'X-CSRF-Token': CSRF_TOKEN})
+            assert resp.status_code == 400
+        finally:
+            with processor._active_runs_lock:
+                processor._active_runs.pop('test-done', None)
+
+    def test_active_runs_endpoint(self, auth_client):
+        """GET /api/runs/active returns active runs."""
+        from src import processor
+        run_state = processor.RunState('test-active', dry_run=False, source='scheduler')
+        run_state.current_store = 'WW Mode'
+        processor.register_run(run_state)
+
+        try:
+            resp = auth_client.get('/api/runs/active')
+            data = resp.get_json()
+            assert resp.status_code == 200
+            assert isinstance(data, list)
+            active_ids = [r['run_id'] for r in data]
+            assert 'test-active' in active_ids
+            run_info = next(r for r in data if r['run_id'] == 'test-active')
+            assert run_info['source'] == 'scheduler'
+            assert run_info['current_store'] == 'WW Mode'
+        finally:
+            with processor._active_runs_lock:
+                processor._active_runs.pop('test-active', None)
+
+    def test_active_runs_requires_auth(self, client):
+        """Active runs endpoint requires authentication."""
+        resp = client.get('/api/runs/active')
+        assert resp.status_code == 302
+
+    def test_run_status_requires_auth(self, client):
+        """Run status endpoint requires authentication."""
+        resp = client.get('/api/runs/some-id')
+        assert resp.status_code == 302
+
+    def test_cancel_requires_auth(self, client):
+        """Cancel endpoint requires authentication."""
+        resp = client.post('/api/runs/some-id/cancel')
+        assert resp.status_code == 302
+
+
 class TestSafeTemplatePath:
     def test_prefix_matching_bug(self, auth_client):
         """BUG: _safe_template_path uses startswith which can match

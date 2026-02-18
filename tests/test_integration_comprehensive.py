@@ -728,3 +728,148 @@ class TestPerStoreDryRun:
         assert summary['errors'] == 1
         assert summary['processed'] == 0
         mock_shopify.assert_not_called()
+
+
+# =============================================================================
+# RUN STATE, CANCELLATION & LOCK SKIP TESTS
+# =============================================================================
+
+@patch('src.processor._load_template')
+@patch('src.shopify_client.get_recent_orders')
+@patch('src.parcel_panel.get_order_tracking')
+@patch('src.email_sender.send_email')
+class TestRunStateAndCancellation:
+    """Tests for RunState progress tracking and cancellation."""
+
+    def test_run_state_tracks_progress(self, mock_sendgrid, mock_parcelpanel,
+                                       mock_shopify, mock_template, test_store):
+        """RunState counters update during processing."""
+        mock_template.return_value = '<p>Order {{ order_number }}</p>'
+        database.create_store(test_store)
+
+        mock_shopify.return_value = [
+            {
+                'id': str(i), 'name': f'#10{i}',
+                'created_at': '2024-01-01T00:00:00Z',
+                'customer': {'email': f'c{i}@test.com', 'first_name': f'C{i}'},
+                'fulfillments': [{'tracking_number': f'TRK{i}'}],
+                'cancelled_at': None,
+            }
+            for i in range(3)
+        ]
+        mock_parcelpanel.return_value = {
+            'shipments': [{'status': 'PENDING', 'tracking_number': 'TRK0'}],
+        }
+
+        run_state = processor.RunState('test-run', dry_run=True)
+        summary = processor.process_all_stores(
+            dry_run=True, store_id='test-store', run_state=run_state)
+
+        assert run_state.total_stores == 1
+        assert run_state.stores_processed == 1
+        assert run_state.current_store == 'Test Store'
+        assert run_state.total_orders == 3
+        assert run_state.orders_checked == 3
+        assert run_state.emails_found == summary['emails_sent']
+
+    def test_cancellation_stops_processing(self, mock_sendgrid, mock_parcelpanel,
+                                           mock_shopify, mock_template, test_store):
+        """Setting cancel_event stops processing between orders."""
+        mock_template.return_value = '<p>Order {{ order_number }}</p>'
+        database.create_store(test_store)
+
+        orders = [
+            {
+                'id': str(i), 'name': f'#20{i}',
+                'created_at': '2024-01-01T00:00:00Z',
+                'customer': {'email': f'c{i}@test.com', 'first_name': f'C{i}'},
+                'fulfillments': [{'tracking_number': f'TRK{i}'}],
+                'cancelled_at': None,
+            }
+            for i in range(10)
+        ]
+        mock_shopify.return_value = orders
+        mock_parcelpanel.return_value = {
+            'shipments': [{'status': 'PENDING', 'tracking_number': 'TRK0'}],
+        }
+
+        run_state = processor.RunState('cancel-test', dry_run=True)
+        # Cancel immediately — should stop after checking first order
+        run_state.cancel_event.set()
+
+        summary = processor.process_all_stores(
+            dry_run=True, store_id='test-store', run_state=run_state)
+
+        # Should have processed far fewer than 10 orders
+        assert run_state.orders_checked < 10
+        # Result still returns valid summary
+        assert 'emails_sent' in summary
+
+    def test_dry_run_skips_store_lock(self, mock_sendgrid, mock_parcelpanel,
+                                      mock_shopify, mock_template, test_store):
+        """Dry runs don't acquire the store lock, so they can't return already_running."""
+        mock_template.return_value = '<p>Order {{ order_number }}</p>'
+        database.create_store(test_store)
+        mock_shopify.return_value = []
+
+        # Acquire the store lock manually (simulating a live run in progress)
+        import threading
+        lock = processor._get_store_lock('test-store')
+        lock.acquire()
+
+        try:
+            # Dry run should still work — it skips the lock
+            result = processor.process_store(test_store, dry_run=True)
+            assert 'already_running' not in result
+        finally:
+            lock.release()
+
+    def test_live_run_respects_store_lock(self, mock_sendgrid, mock_parcelpanel,
+                                          mock_shopify, mock_template, test_store):
+        """Live runs still respect the store lock."""
+        database.create_store(test_store)
+        mock_shopify.return_value = []
+
+        lock = processor._get_store_lock('test-store')
+        lock.acquire()
+
+        try:
+            result = processor.process_store(test_store, dry_run=False)
+            assert result.get('already_running') is True
+        finally:
+            lock.release()
+
+    def test_register_and_get_run(self, mock_sendgrid, mock_parcelpanel,
+                                  mock_shopify, mock_template, test_store):
+        """RunState can be registered and retrieved."""
+        run_state = processor.RunState('reg-test', dry_run=True)
+        processor.register_run(run_state)
+
+        retrieved = processor.get_run('reg-test')
+        assert retrieved is run_state
+        assert retrieved.run_id == 'reg-test'
+        assert retrieved.dry_run is True
+        assert retrieved.status == 'running'
+
+        # Cleanup
+        with processor._active_runs_lock:
+            del processor._active_runs['reg-test']
+
+    def test_get_active_runs(self, mock_sendgrid, mock_parcelpanel,
+                             mock_shopify, mock_template, test_store):
+        """get_active_runs returns only running runs."""
+        run1 = processor.RunState('active-1', dry_run=True)
+        run2 = processor.RunState('active-2', dry_run=False, source='scheduler')
+        run2.status = 'completed'
+        processor.register_run(run1)
+        processor.register_run(run2)
+
+        active = processor.get_active_runs()
+        active_ids = [r.run_id for r in active]
+        assert 'active-1' in active_ids
+        assert 'active-2' not in active_ids
+
+        # Cleanup
+        with processor._active_runs_lock:
+            processor._active_runs.pop('active-1', None)
+            processor._active_runs.pop('active-2', None)

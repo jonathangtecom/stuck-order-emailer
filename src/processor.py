@@ -2,7 +2,7 @@ import os
 import time
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from jinja2.sandbox import SandboxedEnvironment
 
@@ -26,6 +26,66 @@ def _get_store_lock(store_id):
             _store_locks[store_id] = threading.Lock()
         return _store_locks[store_id]
 
+# ── Run state tracking ─────────────────────────────────────────
+
+class RunState:
+    """Tracks progress of a processing run (dry run or live)."""
+
+    def __init__(self, run_id, dry_run=False, source='manual'):
+        self.run_id = run_id
+        self.dry_run = dry_run
+        self.source = source          # 'manual' or 'scheduler'
+        self.status = 'running'       # running, completed, cancelled, error
+        self.cancel_event = threading.Event()
+        self.started_at = datetime.now(timezone.utc)
+        self.completed_at = None
+        # Progress
+        self.total_stores = 0
+        self.stores_processed = 0
+        self.current_store = ''
+        self.total_orders = 0
+        self.orders_checked = 0
+        self.emails_found = 0
+        self.skipped = 0
+        # Result (set on completion)
+        self.result = None
+        self.error_message = None
+
+
+_active_runs = {}
+_active_runs_lock = threading.Lock()
+
+
+def register_run(run_state):
+    """Register a run for progress tracking."""
+    _cleanup_old_runs()
+    with _active_runs_lock:
+        _active_runs[run_state.run_id] = run_state
+
+
+def get_run(run_id):
+    """Get a run by its ID."""
+    with _active_runs_lock:
+        return _active_runs.get(run_id)
+
+
+def get_active_runs():
+    """Get all currently running runs."""
+    with _active_runs_lock:
+        return [r for r in _active_runs.values() if r.status == 'running']
+
+
+def _cleanup_old_runs():
+    """Remove completed/cancelled runs older than 10 minutes."""
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+    with _active_runs_lock:
+        to_remove = [rid for rid, r in _active_runs.items()
+                     if r.status != 'running' and r.completed_at
+                     and r.completed_at < cutoff]
+        for rid in to_remove:
+            del _active_runs[rid]
+
+
 try:
     import sentry_sdk
     SENTRY_AVAILABLE = True
@@ -36,12 +96,15 @@ SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
 TEMPLATES_PATH = os.environ.get('TEMPLATES_PATH', 'data/templates')
 
 
-def process_all_stores(dry_run=False, store_id=None):
+def process_all_stores(dry_run=False, store_id=None, run_state=None):
     """Process all enabled stores (or a single store if store_id given).
 
     If dry_run=True, runs the full pipeline (Shopify fetch, ParcelPanel check,
     template rendering) but skips sending emails and recording to the database.
     Returns detailed info about what would have been sent.
+
+    If run_state is provided, updates progress counters and checks for
+    cancellation between stores.
     """
     if store_id:
         store = database.get_store(store_id)
@@ -61,11 +124,21 @@ def process_all_stores(dry_run=False, store_id=None):
         'details': [],
     }
 
+    if run_state:
+        run_state.total_stores = len(stores)
+
     mode = "DRY RUN" if dry_run else "LIVE"
     logger.info("[%s] Starting processing run for %d enabled stores", mode, len(stores))
 
     for store in stores:
-        result = _process_store_with_retry(store, dry_run=dry_run)
+        if run_state and run_state.cancel_event.is_set():
+            logger.info("[%s] Run cancelled by user", mode)
+            break
+
+        if run_state:
+            run_state.current_store = store['name']
+
+        result = _process_store_with_retry(store, dry_run=dry_run, run_state=run_state)
         if 'error' in result:
             summary['errors'] += 1
             summary['details'].append({
@@ -85,11 +158,14 @@ def process_all_stores(dry_run=False, store_id=None):
                 detail['would_send'] = result['would_send']
             summary['details'].append(detail)
 
+        if run_state:
+            run_state.stores_processed += 1
+
     logger.info("[%s] Run complete: %s", mode, summary)
     return summary
 
 
-def process_single_store_by_id(store_id):
+def process_single_store_by_id(store_id, run_state=None):
     """Process a single store by its ID. Used by the per-store scheduler."""
     store = database.get_store(store_id)
     if not store:
@@ -100,14 +176,17 @@ def process_single_store_by_id(store_id):
         return {'error': f'Store {store_id} is disabled'}
 
     logger.info("Scheduled processing for store: %s", store['name'])
-    return _process_store_with_retry(store)
+    if run_state:
+        run_state.total_stores = 1
+        run_state.current_store = store['name']
+    return _process_store_with_retry(store, run_state=run_state)
 
 
 STORE_RETRY_ATTEMPTS = int(os.environ.get('STORE_RETRY_ATTEMPTS', 3))
 STORE_RETRY_BASE_DELAY = int(os.environ.get('STORE_RETRY_BASE_DELAY', 60))  # seconds
 
 
-def _process_store_with_retry(store, dry_run=False):
+def _process_store_with_retry(store, dry_run=False, run_state=None):
     """Try processing a store with retries on transient failures.
 
     If the Shopify or ParcelPanel API is temporarily down, waits and retries
@@ -116,8 +195,10 @@ def _process_store_with_retry(store, dry_run=False):
     """
     last_error = None
     for attempt in range(STORE_RETRY_ATTEMPTS):
+        if run_state and run_state.cancel_event.is_set():
+            return {'sent': 0, 'skipped': 0}
         try:
-            return process_store(store, dry_run=dry_run)
+            return process_store(store, dry_run=dry_run, run_state=run_state)
         except Exception as e:
             last_error = e
             if attempt < STORE_RETRY_ATTEMPTS - 1:
@@ -135,16 +216,21 @@ def _process_store_with_retry(store, dry_run=False):
     return {'error': str(last_error)}
 
 
-def process_store(store, dry_run=False):
+def process_store(store, dry_run=False, run_state=None):
     """Process a single store. Returns dict with sent/skipped counts.
 
     Uses a per-store lock to prevent concurrent processing (e.g. "Run Now"
     overlapping with a scheduled job). If the store is already being processed,
     returns immediately with already_running=True.
+
+    Dry runs skip the lock so they never block scheduled live runs.
     """
     store_id = store['id']
     store_name = store['name']
-    days_threshold = store.get('days_threshold', 8)
+
+    if dry_run:
+        # Dry runs are read-only — don't hold the lock, don't block live runs
+        return _process_store_unlocked(store, dry_run=True, run_state=run_state)
 
     lock = _get_store_lock(store_id)
     if not lock.acquire(blocking=False):
@@ -152,13 +238,13 @@ def process_store(store, dry_run=False):
         return {'sent': 0, 'skipped': 0, 'already_running': True}
 
     try:
-        return _process_store_unlocked(store, dry_run=dry_run)
+        return _process_store_unlocked(store, dry_run=False, run_state=run_state)
     finally:
         lock.release()
 
 
-def _process_store_unlocked(store, dry_run=False):
-    """Internal: process a store (caller must hold the store lock)."""
+def _process_store_unlocked(store, dry_run=False, run_state=None):
+    """Internal: process a store (caller must hold the store lock for live runs)."""
     store_id = store['id']
     store_name = store['name']
     days_threshold = store.get('days_threshold', 8)
@@ -189,11 +275,20 @@ def _process_store_unlocked(store, dry_run=False):
         days_back=days_back,
     )
 
+    if run_state:
+        run_state.total_orders = len(orders)
+        run_state.orders_checked = 0
+
     sent = 0
     skipped = 0
     would_send = []  # Only populated in dry_run mode
 
     for order in orders:
+        if run_state and run_state.cancel_event.is_set():
+            logger.info("Processing cancelled for store %s after %d/%d orders",
+                        store_name, run_state.orders_checked, len(orders))
+            break
+
         try:
             result = _process_order(store, order, days_threshold, template_html, dry_run=dry_run)
             if isinstance(result, dict):
@@ -208,6 +303,13 @@ def _process_store_unlocked(store, dry_run=False):
             logger.error("Error processing order %s in store %s: %s",
                          order.get('name', '?'), store_name, e)
             continue  # One bad order never blocks others
+
+        if run_state:
+            run_state.orders_checked += 1
+            if isinstance(result, dict) or result == 'sent':
+                run_state.emails_found += 1
+            elif result == 'skipped':
+                run_state.skipped += 1
 
     logger.info("Store %s: sent=%d, skipped=%d", store_name, sent, skipped)
     output = {'sent': sent, 'skipped': skipped}

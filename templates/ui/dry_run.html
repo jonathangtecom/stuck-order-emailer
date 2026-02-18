@@ -3,6 +3,13 @@
 {% block title %}Dry Run — Stuck Order Emailer{% endblock %}
 
 {% block content %}
+<!-- Active scheduled runs banner -->
+<div id="active-runs-section" style="display: none; margin-bottom: 1rem;">
+  <div class="flash-info" role="status">
+    <span id="active-run-info"></span>
+  </div>
+</div>
+
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
   <h2 style="margin-bottom: 0;">Dry Run</h2>
   <div style="display: flex; gap: 0.5rem; align-items: center;">
@@ -21,9 +28,14 @@
   Shows exactly which customers would receive an email.
 </p>
 
-<!-- Loading state -->
-<div id="loading-state" style="display: none; text-align: center; padding: 2rem 0;">
-  <p id="loading-message" aria-busy="true">Running dry run across all enabled stores... This may take a minute.</p>
+<!-- Progress state -->
+<div id="progress-state" style="display: none;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+    <p id="progress-message" style="margin-bottom: 0;" aria-busy="true">Starting dry run...</p>
+    <button id="btn-cancel" class="secondary outline" style="margin-bottom: 0;" onclick="cancelRun()">Cancel</button>
+  </div>
+  <progress id="progress-bar" value="0" max="100" style="margin-bottom: 0.25rem;"></progress>
+  <small id="progress-detail" style="color: var(--pico-muted-color);"></small>
 </div>
 
 <!-- Error state -->
@@ -78,11 +90,14 @@
 <script>
 const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 const emailBodies = {};
+let currentRunId = null;
+let pollInterval = null;
+let activeRunsInterval = null;
 
 async function runDryRun() {
   const btn = document.getElementById('btn-dry-run');
   const desc = document.getElementById('dry-run-description');
-  const loading = document.getElementById('loading-state');
+  const progress = document.getElementById('progress-state');
   const errorState = document.getElementById('error-state');
   const results = document.getElementById('results-section');
 
@@ -93,12 +108,16 @@ async function runDryRun() {
   btn.setAttribute('aria-busy', 'true');
   btn.textContent = 'Running...';
   desc.style.display = 'none';
-  loading.style.display = 'block';
   errorState.style.display = 'none';
   results.style.display = 'none';
 
   const storeName = storeId ? storeSelect.selectedOptions[0].text : 'all enabled stores';
-  document.getElementById('loading-message').textContent = 'Running dry run for ' + storeName + '... This may take a minute.';
+  document.getElementById('progress-message').textContent = 'Starting dry run for ' + storeName + '...';
+  document.getElementById('progress-bar').value = 0;
+  document.getElementById('progress-bar').removeAttribute('value');
+  document.getElementById('progress-detail').textContent = '';
+  document.getElementById('btn-cancel').disabled = false;
+  progress.style.display = 'block';
 
   try {
     let url = '/api/run?dry_run=1';
@@ -110,26 +129,103 @@ async function runDryRun() {
       throw new Error(data.error || 'Unknown error');
     }
 
-    renderResults(data);
+    currentRunId = data.run_id;
+    pollInterval = setInterval(pollProgress, 2000);
+    // Do an immediate first poll
+    pollProgress();
   } catch (e) {
+    progress.style.display = 'none';
     document.getElementById('error-message').textContent = e.message;
     errorState.style.display = 'block';
-  } finally {
-    loading.style.display = 'none';
-    btn.disabled = false;
-    btn.removeAttribute('aria-busy');
-    btn.textContent = 'Run Dry Run';
+    resetButton();
   }
 }
 
-function renderResults(data) {
+async function pollProgress() {
+  if (!currentRunId) return;
+  try {
+    const resp = await fetch('/api/runs/' + currentRunId);
+    if (!resp.ok) return;
+    const data = await resp.json();
+
+    updateProgressDisplay(data.progress, data.status);
+
+    if (data.status === 'completed' || data.status === 'cancelled' || data.status === 'error') {
+      clearInterval(pollInterval);
+      pollInterval = null;
+      document.getElementById('progress-state').style.display = 'none';
+      resetButton();
+
+      if (data.status === 'error') {
+        document.getElementById('error-message').textContent = data.error || 'Unknown error';
+        document.getElementById('error-state').style.display = 'block';
+      } else {
+        if (data.result) {
+          renderResults(data.result, data.status === 'cancelled');
+        }
+      }
+      currentRunId = null;
+    }
+  } catch (e) {
+    // Network error — keep polling, it might recover
+  }
+}
+
+function updateProgressDisplay(progress, status) {
+  const msg = document.getElementById('progress-message');
+  const bar = document.getElementById('progress-bar');
+  const detail = document.getElementById('progress-detail');
+
+  if (status === 'running' && progress.current_store) {
+    msg.textContent = 'Processing ' + progress.current_store + '...';
+  }
+
+  if (progress.total_orders > 0) {
+    const pct = Math.round((progress.orders_checked / progress.total_orders) * 100);
+    bar.value = pct;
+    bar.max = 100;
+    detail.textContent = progress.orders_checked + ' / ' + progress.total_orders + ' orders checked'
+      + ' — ' + progress.emails_found + ' would send'
+      + ', ' + progress.skipped + ' skipped';
+  } else if (progress.orders_checked > 0) {
+    bar.removeAttribute('value');
+    detail.textContent = progress.orders_checked + ' orders checked'
+      + ' — ' + progress.emails_found + ' would send';
+  }
+
+  if (progress.total_stores > 1 && progress.stores_processed > 0) {
+    detail.textContent += ' (store ' + progress.stores_processed + '/' + progress.total_stores + ')';
+  }
+}
+
+async function cancelRun() {
+  if (!currentRunId) return;
+  document.getElementById('btn-cancel').disabled = true;
+  document.getElementById('progress-message').textContent = 'Cancelling...';
+  try {
+    await fetch('/api/runs/' + currentRunId + '/cancel',
+      {method: 'POST', headers: {'X-CSRF-Token': csrfToken}});
+  } catch (e) {
+    // Ignore — poll will pick up the status change
+  }
+}
+
+function resetButton() {
+  const btn = document.getElementById('btn-dry-run');
+  btn.disabled = false;
+  btn.removeAttribute('aria-busy');
+  btn.textContent = 'Run Dry Run';
+}
+
+function renderResults(data, wasCancelled) {
   const results = document.getElementById('results-section');
   const emptyState = document.getElementById('empty-state');
   const storeSections = document.getElementById('store-sections');
 
   const now = new Date();
-  document.getElementById('results-timestamp').textContent =
-    'Report generated ' + now.toLocaleDateString() + ' at ' + now.toLocaleTimeString();
+  let timestamp = 'Report generated ' + now.toLocaleDateString() + ' at ' + now.toLocaleTimeString();
+  if (wasCancelled) timestamp += ' (cancelled — partial results)';
+  document.getElementById('results-timestamp').textContent = timestamp;
 
   document.getElementById('summary-stats').innerHTML =
     '<div class="stat-card"><p class="stat-value">' + data.processed + '</p><p class="stat-label">Stores Processed</p></div>' +
@@ -298,5 +394,42 @@ function closePreviewModal() {
   document.getElementById('email-preview-modal').close();
   document.getElementById('preview-iframe').srcdoc = '';
 }
+
+// ── Active scheduled runs polling ────────────────────────────
+
+async function checkActiveRuns() {
+  try {
+    const resp = await fetch('/api/runs/active');
+    if (!resp.ok) return;
+    const runs = await resp.json();
+    const scheduled = runs.filter(function(r) { return r.source === 'scheduler'; });
+    const section = document.getElementById('active-runs-section');
+
+    if (scheduled.length > 0) {
+      const parts = scheduled.map(function(r) {
+        let text = r.current_store + ': ';
+        if (r.total_orders > 0) {
+          text += r.orders_checked + '/' + r.total_orders + ' orders';
+        } else {
+          text += 'fetching orders...';
+        }
+        if (r.emails_found > 0) {
+          text += ', ' + r.emails_found + ' sent';
+        }
+        return text;
+      });
+      document.getElementById('active-run-info').textContent =
+        'Scheduled run in progress: ' + parts.join(' | ');
+      section.style.display = 'block';
+    } else {
+      section.style.display = 'none';
+    }
+  } catch (e) {
+    // Ignore network errors
+  }
+}
+
+activeRunsInterval = setInterval(checkActiveRuns, 5000);
+checkActiveRuns();
 </script>
 {% endblock %}
