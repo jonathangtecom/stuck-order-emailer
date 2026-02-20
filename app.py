@@ -647,6 +647,7 @@ def api_template_preview():
         'store_name': 'Example Store',
         'order_date': 'January 28, 2026',
         'days_waiting': '10',
+        'country_code': data.get('country_code', 'US'),
     }
 
     try:
@@ -693,6 +694,7 @@ def api_template_send_test():
         'store_name': 'Example Store',
         'order_date': 'January 28, 2026',
         'days_waiting': '10',
+        'country_code': data.get('country_code', 'US'),
     }
 
     try:

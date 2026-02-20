@@ -24,6 +24,13 @@
     <div class="editor-actions">
       <button id="btn-save" onclick="saveFile()" disabled>Save</button>
       <button id="btn-preview" class="secondary" onclick="previewFile()" disabled>Preview</button>
+      <select id="preview-country" style="margin-bottom: 0; padding: 0.25rem 0.5rem; width: auto; font-size: 0.85rem;" title="Preview country for {{ '{{' }} country_code {{ '}}' }}">
+        <option value="US">US</option>
+        <option value="GB">GB</option>
+        <option value="DE">DE</option>
+        <option value="CA">CA</option>
+        <option value="AU">AU</option>
+      </select>
       <button id="btn-test-email" class="secondary" onclick="openTestEmailModal()" disabled>Send Test Email</button>
       <button id="btn-duplicate" class="secondary outline" onclick="duplicateFile()" disabled>Duplicate</button>
       <button id="btn-delete" class="secondary outline" onclick="deleteFile()" disabled style="color: var(--pico-del-color, #c62828);">Delete</button>
@@ -188,10 +195,11 @@
 
   window.previewFile = async function() {
     try {
+      const countryCode = document.getElementById('preview-country').value;
       const resp = await fetch('/api/templates/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-        body: JSON.stringify({ content: getEditorContent() }),
+        body: JSON.stringify({ content: getEditorContent(), country_code: countryCode }),
       });
       if (!resp.ok) {
         const err = await resp.json();
