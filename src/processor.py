@@ -369,6 +369,10 @@ def _process_order(store, order, days_threshold, template_html, dry_run=False):
                         order_number, store['name'])
         return 'skipped'
 
+    # Extract shipping country for region-based template conditionals
+    shipping_address = order.get('shipping_address') or {}
+    country_code = shipping_address.get('country_code', '')
+
     # Determine if order has fulfillments (tracking) or is unfulfilled
     fulfillments = order.get('fulfillments') or []
     is_unfulfilled = len(fulfillments) == 0
@@ -417,6 +421,7 @@ def _process_order(store, order, days_threshold, template_html, dry_run=False):
         'store_name': store['name'],
         'order_date': order_date.strftime('%B %d, %Y'),
         'days_waiting': str(days_waiting),
+        'country_code': country_code,
     }
 
     try:

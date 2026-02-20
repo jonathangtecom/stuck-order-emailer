@@ -46,7 +46,7 @@ def get_recent_orders(store_url, api_token, days_back=30):
         'fulfillment_status': 'any',
         'created_at_min': created_at_min,
         'limit': 250,
-        'fields': 'id,name,created_at,customer,fulfillment_status,fulfillments,cancelled_at',
+        'fields': 'id,name,created_at,customer,fulfillment_status,fulfillments,cancelled_at,shipping_address',
     }
 
     all_orders = []

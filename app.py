@@ -1022,7 +1022,7 @@ _TEMPLATE_DUMMY_VARS = {
     'customer_name': 'Test Customer', 'first_name': 'Test',
     'order_number': '#0000', 'tracking_number': 'N/A', 'tracking_url': '',
     'store_name': 'Test Store', 'order_date': 'January 01, 2025',
-    'days_waiting': '8',
+    'days_waiting': '8', 'country_code': 'US',
 }
 
 

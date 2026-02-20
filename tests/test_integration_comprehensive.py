@@ -873,3 +873,79 @@ class TestRunStateAndCancellation:
         with processor._active_runs_lock:
             processor._active_runs.pop('active-1', None)
             processor._active_runs.pop('active-2', None)
+
+
+@patch('src.processor._load_template')
+@patch('src.email_sender.send_email')
+@patch('src.parcel_panel.get_order_tracking')
+@patch('src.shopify_client.get_recent_orders')
+class TestCountryCodeTemplateVariable:
+    """Tests for country_code template variable from shipping_address."""
+
+    def test_country_code_passed_to_template(self, mock_shopify, mock_parcelpanel,
+                                              mock_sendgrid, mock_template, test_store):
+        """country_code from shipping_address should appear in dry run output."""
+        mock_template.return_value = '<p>{{ order_number }} - {{ country_code }}</p>'
+        mock_shopify.return_value = [{
+            'id': '901',
+            'name': '#5001',
+            'created_at': '2024-01-01T00:00:00Z',
+            'customer': {'email': 'uk@example.com', 'first_name': 'Alice', 'last_name': 'Smith'},
+            'fulfillments': [{'tracking_number': 'YT901'}],
+            'cancelled_at': None,
+            'shipping_address': {'country_code': 'GB', 'country': 'United Kingdom'},
+        }]
+        mock_parcelpanel.return_value = {
+            'shipments': [{'status': 'PENDING', 'tracking_number': 'YT901'}],
+            'tracking_link': 'https://track.example.com/YT901',
+        }
+        mock_sendgrid.return_value = True
+
+        result = processor.process_store(test_store, dry_run=True)
+        assert len(result['would_send']) == 1
+        assert 'GB' in result['would_send'][0]['rendered_body']
+
+    def test_missing_shipping_address_defaults_empty(self, mock_shopify, mock_parcelpanel,
+                                                      mock_sendgrid, mock_template, test_store):
+        """Orders without shipping_address should have empty country_code."""
+        mock_template.return_value = '<p>country=[{{ country_code }}]</p>'
+        mock_shopify.return_value = [{
+            'id': '902',
+            'name': '#5002',
+            'created_at': '2024-01-01T00:00:00Z',
+            'customer': {'email': 'test@example.com', 'first_name': 'Bob', 'last_name': 'Jones'},
+            'fulfillments': [{'tracking_number': 'YT902'}],
+            'cancelled_at': None,
+            # No shipping_address field
+        }]
+        mock_parcelpanel.return_value = {
+            'shipments': [{'status': 'PENDING', 'tracking_number': 'YT902'}],
+            'tracking_link': 'https://track.example.com/YT902',
+        }
+        mock_sendgrid.return_value = True
+
+        result = processor.process_store(test_store, dry_run=True)
+        assert len(result['would_send']) == 1
+        assert 'country=[]' in result['would_send'][0]['rendered_body']
+
+    def test_country_code_us_order(self, mock_shopify, mock_parcelpanel,
+                                    mock_sendgrid, mock_template, test_store):
+        """US orders should have country_code='US'."""
+        mock_template.return_value = '{% if country_code == "GB" %}UK{% else %}US{% endif %}'
+        mock_shopify.return_value = [{
+            'id': '903',
+            'name': '#5003',
+            'created_at': '2024-01-01T00:00:00Z',
+            'customer': {'email': 'us@example.com', 'first_name': 'Charlie', 'last_name': 'Brown'},
+            'fulfillments': [{'tracking_number': 'YT903'}],
+            'cancelled_at': None,
+            'shipping_address': {'country_code': 'US', 'country': 'United States'},
+        }]
+        mock_parcelpanel.return_value = {
+            'shipments': [{'status': 'PENDING', 'tracking_number': 'YT903'}],
+            'tracking_link': 'https://track.example.com/YT903',
+        }
+        mock_sendgrid.return_value = True
+
+        result = processor.process_store(test_store, dry_run=True)
+        assert result['would_send'][0]['rendered_body'] == 'US'

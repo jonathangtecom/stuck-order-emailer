@@ -68,7 +68,7 @@
       <input type="text" name="email_subject"
              value="{{ store.email_subject if store else 'Update on your order {{ order_number }}' }}"
              required>
-      <small>Supports Jinja2 variables: {{ '{{' }} first_name {{ '}}' }}, {{ '{{' }} customer_name {{ '}}' }}, {{ '{{' }} order_number {{ '}}' }}, {{ '{{' }} tracking_number {{ '}}' }}, {{ '{{' }} store_name {{ '}}' }}, {{ '{{' }} days_waiting {{ '}}' }}</small>
+      <small>Supports Jinja2 variables: {{ '{{' }} first_name {{ '}}' }}, {{ '{{' }} customer_name {{ '}}' }}, {{ '{{' }} order_number {{ '}}' }}, {{ '{{' }} tracking_number {{ '}}' }}, {{ '{{' }} store_name {{ '}}' }}, {{ '{{' }} days_waiting {{ '}}' }}, {{ '{{' }} country_code {{ '}}' }}</small>
     </label>
     <label>
       Email Template *
